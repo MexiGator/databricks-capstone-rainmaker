@@ -1,0 +1,5 @@
+flask>=3.0
+psycopg2-binary>=2.9
+requests>=2.31
+sentence-transformers>=2.7
+databricks-sdk>=0.30

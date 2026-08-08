@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rainmaker — Storm Response</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── Palette: deep storm slate + the actual NWS hazard colour codes ──
+   Severity colours are lifted from NWS/SPC warning products, so a roofer
+   reading this board sees the same red/amber/green they see on radar. */
+:root{
+  --slate-900:#0C1424; --slate-850:#111C31; --slate-800:#16233C;
+  --slate-700:#22314F; --slate-600:#31415F;
+  --paper:#E6ECF6; --muted:#8A9BB8; --dim:#5E7092;
+
+  --hz-critical:#D8232A;   /* NWS tornado red      */
+  --hz-high:#F2B705;       /* NWS severe amber     */
+  --hz-medium:#2E9E5B;     /* NWS flood green      */
+  --hz-low:#5E7092;
+
+  --money:#E8B54A;
+  --live:#4FD4B0;
+
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--slate-900);color:var(--paper);font-family:var(--sans);
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid var(--live);outline-offset:2px}
+
+/* ── Masthead ─────────────────────────────────────────────── */
+header{
+  display:flex;align-items:center;gap:24px;padding:14px 22px;
+  border-bottom:1px solid var(--slate-700);background:var(--slate-850);
+  position:sticky;top:0;z-index:20;flex-wrap:wrap;
+}
+.wordmark{font-family:var(--mono);font-weight:600;font-size:15px;letter-spacing:.16em}
+.wordmark span{color:var(--hz-high)}
+nav{display:flex;gap:2px}
+nav button{
+  font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  padding:7px 14px;color:var(--muted);border:1px solid transparent;border-radius:2px;
+}
+nav button[aria-selected="true"]{color:var(--paper);border-color:var(--slate-600);background:var(--slate-800)}
+.ask-launch{
+  margin-left:auto;font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;padding:7px 14px;border:1px solid var(--slate-600);
+  border-radius:2px;color:var(--muted);
+}
+.ask-launch:hover{color:var(--paper);border-color:var(--live)}
+
+/* ── Bulletin strip: NWS products are fixed-width teletype. This is
+      what the raw API payload looks like, shown as-is. ──────────── */
+.bulletin{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;
+  background:var(--slate-800);border-bottom:1px solid var(--slate-700);
+  padding:9px 22px;display:flex;gap:14px;align-items:center;overflow-x:auto;white-space:nowrap;
+}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--live);flex:none;animation:pulse 2.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.bulletin b{color:var(--hz-high);font-weight:500}
+.bulletin .sep{color:var(--slate-600)}
+
+/* ── Stat rail ────────────────────────────────────────────── */
+.rail{display:flex;gap:0;border-bottom:1px solid var(--slate-700);background:var(--slate-850)}
+.stat{padding:16px 22px;border-right:1px solid var(--slate-700);min-width:150px}
+.stat dt{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.stat dd{font-size:26px;font-weight:600;margin-top:3px;letter-spacing:-.02em}
+.stat.money dd{color:var(--money)}
+.stat .qual{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:4px;font-weight:400}
+
+/* ── Split ────────────────────────────────────────────────── */
+.split{display:grid;grid-template-columns:1fr 380px;min-height:calc(100vh - 190px)}
+.queue{border-right:1px solid var(--slate-700)}
+.panel{background:var(--slate-850)}
+.section-head{
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);padding:12px 22px;border-bottom:1px solid var(--slate-700);
+  display:flex;align-items:center;gap:12px;
+}
+.section-head select{
+  margin-left:auto;background:var(--slate-800);color:var(--paper);border:1px solid var(--slate-600);
+  border-radius:2px;padding:4px 8px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+}
+
+/* ── Queue rows ───────────────────────────────────────────── */
+.row{
+  display:grid;grid-template-columns:96px 1fr 108px 96px;gap:14px;align-items:center;
+  padding:12px 22px;border-bottom:1px solid var(--slate-800);cursor:pointer;
+}
+.row:hover{background:var(--slate-850)}
+.row[aria-selected="true"]{background:var(--slate-800);box-shadow:inset 3px 0 0 var(--live)}
+
+/* SIGNATURE: the exposure meter — a radar-return readout, not a progress bar */
+.meter{display:flex;align-items:center;gap:7px}
+.bars{display:flex;gap:1.5px}
+.bars i{width:4px;border-radius:0;background:var(--slate-700);display:block}
+.bars i:nth-child(1){height:6px}  .bars i:nth-child(2){height:9px}
+.bars i:nth-child(3){height:12px} .bars i:nth-child(4){height:15px}
+.bars i:nth-child(5){height:18px} .bars i:nth-child(6){height:21px}
+.bars i:nth-child(7){height:24px} .bars i:nth-child(8){height:27px}
+.bars i.on{background:var(--hz)}
+.score{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+.who{min-width:0}
+.who b{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who small{font-family:var(--mono);font-size:10.5px;color:var(--dim);letter-spacing:.03em}
+.tag{
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  padding:1px 5px;border:1px solid var(--slate-600);border-radius:2px;color:var(--muted);margin-left:6px;
+}
+.val{font-family:var(--mono);font-size:13px;color:var(--money);text-align:right}
+.state{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  text-align:right;color:var(--dim);
+}
+.state.live{color:var(--live)}
+
+/* ── Draft panel ──────────────────────────────────────────── */
+.panel-body{padding:18px 22px}
+.empty{color:var(--dim);font-size:13px;line-height:1.7}
+.grounding{
+  border-left:2px solid var(--live);padding:9px 12px;margin-bottom:14px;background:var(--slate-800);
+}
+.grounding .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.grounding .name{font-size:12.5px;margin-top:3px}
+.grounding .nums{font-family:var(--mono);font-size:11px;color:var(--live);margin-top:3px}
+.draft-text{
+  background:var(--slate-900);border:1px solid var(--slate-700);border-radius:2px;
+  padding:13px;font-size:13px;line-height:1.65;white-space:pre-wrap;min-height:120px;
+  width:100%;color:var(--paper);font-family:var(--sans);resize:vertical;
+}
+.actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  padding:9px 14px;border-radius:2px;border:1px solid var(--slate-600);color:var(--paper);
+}
+.btn:hover:not(:disabled){border-color:var(--live)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.go{background:var(--live);color:var(--slate-900);border-color:var(--live);font-weight:600}
+.btn.go:hover:not(:disabled){filter:brightness(1.1)}
+.stat.safety dd{color:var(--live)}
+.safety-block{border-left:2px solid var(--hz-medium);padding:10px 13px;background:var(--slate-800);margin-bottom:14px}
+.safety-block .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--hz-medium)}
+.safety-block .msg{font-size:12.5px;line-height:1.6;white-space:pre-wrap;margin-top:7px;color:var(--muted);max-height:150px;overflow-y:auto}
+.safety-block .prov{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:8px}
+.gate{border-left:2px solid var(--hz-high);padding:10px 13px;background:var(--slate-800);margin-bottom:14px;font-size:13px}
+.gate .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--hz-high);display:block;margin-bottom:4px}
+.btn.safe{background:var(--hz-medium);color:#08131C;border-color:var(--hz-medium);font-weight:600}
+.loop{margin-top:16px;font-family:var(--mono);font-size:11px;line-height:2}
+.loop div{color:var(--dim)}
+.loop div.done{color:var(--paper)}
+.loop div.done::before{content:'▸ ';color:var(--live)}
+.loop div:not(.done)::before{content:'· '}
+
+/* ── Results tab ──────────────────────────────────────────── */
+.results{padding:22px}
+.funnel{display:flex;gap:0;margin:18px 0 30px;flex-wrap:wrap}
+.step{flex:1;min-width:120px;padding:14px 16px;border:1px solid var(--slate-700);border-right:none}
+.step:last-child{border-right:1px solid var(--slate-700)}
+.step dt{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.step dd{font-size:24px;font-weight:600;margin-top:4px}
+.step .pct{font-family:var(--mono);font-size:11px;color:var(--live);margin-left:5px;font-weight:400}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--dim);text-align:left;padding:9px 12px;border-bottom:1px solid var(--slate-700);font-weight:400;
+}
+td{padding:9px 12px;border-bottom:1px solid var(--slate-800)}
+td.num{font-family:var(--mono);text-align:right}
+td.cash{font-family:var(--mono);text-align:right;color:var(--money)}
+.trail{font-family:var(--mono);font-size:11.5px;line-height:2}
+.trail .arrow{color:var(--live)}
+.trail .ts{color:var(--dim)}
+
+/* ── Ask drawer ───────────────────────────────────────────── */
+.scrim{position:fixed;inset:0;background:rgba(4,8,16,.72);display:none;z-index:30}
+.scrim.open{display:block}
+.drawer{
+  position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--slate-850);
+  border-left:1px solid var(--slate-700);z-index:31;transform:translateX(100%);
+  transition:transform .22s ease;display:flex;flex-direction:column;
+}
+.drawer.open{transform:none}
+.drawer-head{padding:16px 22px;border-bottom:1px solid var(--slate-700);display:flex;align-items:center;gap:12px}
+.drawer-body{padding:18px 22px;overflow-y:auto;flex:1}
+.ask-input{
+  width:100%;background:var(--slate-900);border:1px solid var(--slate-600);border-radius:2px;
+  padding:11px 13px;color:var(--paper);font-family:var(--sans);font-size:13.5px;
+}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{
+  font-size:11.5px;padding:5px 9px;border:1px solid var(--slate-700);border-radius:2px;
+  color:var(--muted);text-align:left;
+}
+.chip:hover{color:var(--paper);border-color:var(--live)}
+.answer{margin-top:18px;font-size:13.5px;line-height:1.75;white-space:pre-wrap}
+.sources{margin-top:20px}
+.src{border-left:2px solid var(--slate-600);padding:8px 12px;margin-bottom:9px;background:var(--slate-800)}
+.src.weather{border-left-color:var(--hz-high)}
+.src.template{border-left-color:var(--live)}
+.src .hd{display:flex;gap:8px;align-items:baseline;font-size:12px}
+.src .sim{font-family:var(--mono);font-size:10.5px;color:var(--live);margin-left:auto;flex:none}
+.src .txt{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.6;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.refused{border-left:2px solid var(--hz-high);padding:10px 13px;background:var(--slate-800);font-size:13px}
+
+.toast{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--slate-800);
+  border:1px solid var(--slate-600);border-left:3px solid var(--live);padding:11px 18px;
+  font-family:var(--mono);font-size:11.5px;z-index:40;opacity:0;transition:opacity .2s;
+}
+.toast.show{opacity:1}
+.hidden{display:none !important}
+@media (max-width:900px){.split{grid-template-columns:1fr}.panel{border-top:1px solid var(--slate-700)}}
+@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wordmark">RAIN<span>MAKER</span></div>
+  <nav>
+    <button id="tab-storm" aria-selected="true" onclick="showTab('storm')">Storm Response</button>
+    <button id="tab-results" aria-selected="false" onclick="showTab('results')">Results</button>
+  </nav>
+  <button class="ask-launch" onclick="openAsk()">Ask ▸</button>
+</header>
+
+<div class="bulletin" id="bulletin"><span class="pulse"></span>Loading active alerts…</div>
+
+<!-- ══ STORM RESPONSE ══════════════════════════════════════ -->
+<section id="view-storm">
+  <dl class="rail">
+    <div class="stat"><dt>Exposed</dt><dd id="s-opps">—</dd></div>
+    <div class="stat safety"><dt>Safety notices</dt><dd id="s-safety">—</dd></div>
+    <div class="stat"><dt>Outreach sent</dt><dd id="s-sent">—</dd></div>
+    <div class="stat"><dt>Inspections booked</dt><dd id="s-booked">—</dd></div>
+    <div class="stat money"><dt>Pipeline</dt><dd id="s-pipe">—<span class="qual">est.</span></dd></div>
+  </dl>
+
+  <div class="split">
+    <div class="queue">
+      <div class="section-head">
+        Opportunity queue — ranked by exposure
+        <select id="filter" onchange="loadQueue()">
+          <option value="all">All</option>
+          <option value="identified">New</option>
+          <option value="drafted">Drafted</option>
+          <option value="sent">Sent</option>
+          <option value="booked">Booked</option>
+        </select>
+      </div>
+      <div id="rows"><div class="panel-body empty">Loading…</div></div>
+    </div>
+
+    <aside class="panel">
+      <div class="section-head">Outreach</div>
+      <div class="panel-body" id="draft-panel">
+        <p class="empty">Pick a row from the queue.<br>The agent drafts a message grounded on the live alert and the campaign that booked best for this hazard.</p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ══ RESULTS ═════════════════════════════════════════════ -->
+<section id="view-results" class="hidden">
+  <div class="results">
+    <div class="section-head" style="padding-left:0;border:none">Conversion funnel
+      <span id="funnel-src" style="margin-left:auto;text-transform:none;letter-spacing:0;font-size:11px"></span></div>
+    <dl class="funnel" id="funnel"></dl>
+
+    <div class="section-head" style="padding-left:0">Pipeline by storm type</div>
+    <table id="by-event"></table>
+
+    <div class="section-head" style="padding-left:0;margin-top:28px">
+      Change data feed — every status transition
+      <span id="trail-src" style="margin-left:auto;text-transform:none;letter-spacing:0;font-size:11px"></span>
+    </div>
+    <div class="trail" id="trail"></div>
+  </div>
+</section>
+
+<!-- ══ ASK ═════════════════════════════════════════════════ -->
+<div class="scrim" id="scrim" onclick="closeAsk()"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-label="Ask">
+  <div class="drawer-head">
+    <div class="section-head" style="padding:0;border:none">Ask — grounded in your storms and campaigns</div>
+    <button class="btn" style="margin-left:auto" onclick="closeAsk()">Close</button>
+  </div>
+  <div class="drawer-body">
+    <input class="ask-input" id="q" placeholder="What messaging has worked best for hail damage?"
+           onkeydown="if(event.key==='Enter')runAsk()">
+    <div class="chips">
+      <button class="chip" onclick="askThis(this)">What messaging has worked best for hail-damage outreach?</button>
+      <button class="chip" onclick="askThis(this)">Given this week's storms, who should I prioritize and what should I say?</button>
+      <button class="chip" onclick="askThis(this)">What's the safety guidance for the current warning?</button>
+      <button class="chip" onclick="askThis(this)">Which homes got hammered by ice?</button>
+    </div>
+    <div id="ask-out"></div>
+  </div>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const HZ = {critical:'var(--hz-critical)',high:'var(--hz-high)',medium:'var(--hz-medium)',low:'var(--hz-low)'};
+let selected = null, queue = [];
+
+const money = n => '$' + Math.round(n||0).toLocaleString();
+const short = n => (n||0) >= 1000 ? '$' + Math.round(n/1000) + 'K' : money(n);
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'), 3200);
+}
+
+function showTab(which){
+  document.getElementById('view-storm').classList.toggle('hidden', which!=='storm');
+  document.getElementById('view-results').classList.toggle('hidden', which!=='results');
+  document.getElementById('tab-storm').ariaSelected = which==='storm';
+  document.getElementById('tab-results').ariaSelected = which==='results';
+  if(which==='results') loadResults();
+}
+
+// ── Bulletin ────────────────────────────────────────────────
+async function loadBulletin(){
+  const events = await (await fetch('/api/active-events')).json();
+  const el = document.getElementById('bulletin');
+  if(!events.length){
+    el.innerHTML = '<span class="pulse"></span>No active alerts over your service areas. Run the weather poller.';
+    return;
+  }
+  el.innerHTML = '<span class="pulse"></span>' + events.map(e =>
+    `<span><b>${e.event_type}</b> · ${(e.area_desc||'').slice(0,40)} · ${e.exposed} exposed</span>`
+  ).join('<span class="sep">│</span>');
+}
+
+// ── Queue ───────────────────────────────────────────────────
+async function loadStats(){
+  const s = await (await fetch('/api/stats')).json();
+  document.getElementById('s-opps').textContent   = s.opportunities ?? 0;
+  document.getElementById('s-safety').textContent = s.safety_sent ?? 0;
+  document.getElementById('s-sent').textContent   = s.sent ?? 0;
+  document.getElementById('s-booked').textContent = s.booked ?? 0;
+  document.getElementById('s-pipe').innerHTML     = short(s.pipeline_est) + '<span class="qual">est.</span>';
+}
+
+async function loadQueue(){
+  const f = document.getElementById('filter').value;
+  queue = await (await fetch('/api/opportunities?status=' + f)).json();
+  const box = document.getElementById('rows');
+  if(!queue.length){
+    box.innerHTML = '<div class="panel-body empty">Nothing here yet. Poll the weather, then run Match &amp; Score.</div>';
+    return;
+  }
+  box.innerHTML = queue.map(o => {
+    const lit = Math.max(1, Math.round(o.exposure_score * 8));
+    const bars = Array.from({length:8}, (_,i) =>
+      `<i class="${i<lit?'on':''}"></i>`).join('');
+    const live = ['sent','responded','booked','won'].includes(o.status);
+    return `<div class="row" role="option" aria-selected="${selected===o.opportunity_id}"
+                 style="--hz:${HZ[o.priority]}" onclick="pick('${o.opportunity_id}')">
+      <div class="meter"><div class="bars">${bars}</div>
+        <span class="score">${Number(o.exposure_score).toFixed(2)}</span></div>
+      <div class="who"><b>${o.name}${o.is_prospect?'<span class="tag">prospect</span>':''}</b>
+        <small>${o.city}, ${o.state} · ${o.event_type}</small></div>
+      <div class="val">${money(o.est_value)}</div>
+      <div class="state ${live?'live':''}">${o.status}</div>
+    </div>`;
+  }).join('');
+}
+
+function pick(id){ selected = id; loadQueue(); renderDraft(); }
+
+function renderDraft(){
+  const o = queue.find(x => x.opportunity_id === selected);
+  const box = document.getElementById('draft-panel');
+  if(!o) return;
+
+  const who = `<div class="empty"><b style="color:var(--paper)">${o.name}</b><br>
+      ${o.city}, ${o.state} · ${o.service_needed}<br>${o.headline||o.event_type}</div>`;
+
+  const safetyBlock = o.safety ? `<div class="safety-block">
+      <div class="lbl">✓ Safety notice sent${o.safety.tone?` · ${o.safety.tone} tone`:""}</div>
+      <div class="msg">${o.safety.message_text}</div>
+      <div class="prov">NWS guidance verbatim · no model call · public domain</div>
+    </div>` : "";
+
+  if(!o.safety){
+    box.innerHTML = who + `
+      <div class="gate"><span class="lbl">Safety first</span>
+        Before any pitch, this customer hears from ${o.assigned_rep||"their rep"} with official NWS
+        guidance for the storm they're in — no ask attached, nothing generated. Tone scales with
+        severity, quiet hours are respected for low-severity alerts, and the notice offers a way to
+        reach a person rather than a way to buy something.</div>
+      <div class="actions">
+        <button class="btn safe" onclick="sendSafety()">Send safety notice</button>
+      </div>`;
+    return;
+  }
+
+  if(!o.draft){
+    box.innerHTML = who + safetyBlock + `
+      <div class="actions"><button class="btn go" onclick="draft()">Draft outreach</button></div>`;
+    return;
+  }
+
+  const d = o.draft, sent = d.outreach_status === 'sent';
+  box.innerHTML = safetyBlock + `
+    ${d.template_id ? `<div class="grounding">
+      <div class="lbl">Grounded on</div>
+      <div class="name">${d.template_id}</div>
+      <div class="nums">similarity ${Number(d.similarity).toFixed(2)}</div>
+    </div>` : ''}
+    <textarea class="draft-text" id="msg" ${sent?'readonly':''}>${d.message_text}</textarea>
+    <div class="actions">
+      <button class="btn go" onclick="send(${d.outreach_id})" ${sent?'disabled':''}>
+        ${sent ? 'Sent' : 'Approve & send'}</button>
+      <button class="btn" onclick="draft()">Redraft</button>
+      <button class="btn" onclick="setStatus('${o.opportunity_id}','won')">Mark job won</button>
+    </div>
+    <div class="loop" id="loop">
+      <div class="done">Safety notice sent</div>
+      <div class="done">Drafted</div>
+      <div class="${sent?'done':''}">Sent</div>
+      <div class="${['responded','booked','won'].includes(o.status)?'done':''}">Customer replied</div>
+      <div class="${['booked','won'].includes(o.status)?'done':''}">Inspection booked</div>
+    </div>`;
+}
+
+async function sendSafety(){
+  const box = document.getElementById('draft-panel');
+  box.innerHTML = '<p class="empty">Composing from the NWS alert — no model call…</p>';
+  const r = await (await fetch(`/api/opportunities/${selected}/safety`, {method:'POST'})).json();
+  if(r.held){ toast(r.reason); }
+  else { toast(r.ok ? 'Safety notice sent — NWS guidance, verbatim' : 'Failed: ' + r.error); }
+  await refresh();
+}
+
+async function draft(){
+  const box = document.getElementById('draft-panel');
+  box.innerHTML = '<p class="empty">Retrieving the best past campaign and drafting…</p>';
+  const r = await (await fetch(`/api/opportunities/${selected}/draft`, {method:'POST'})).json();
+  if(r.blocked){ toast(r.reason); }
+  else if(!r.ok){ toast('Draft failed: ' + r.error); }
+  else { toast(r.grounded_on ? 'Grounded on: ' + r.grounded_on : 'Drafted (no strong campaign match)'); }
+  await refresh();
+}
+
+async function send(outreachId){
+  toast('Sending…');
+  const r = await (await fetch(`/api/outreach/${outreachId}/send`, {method:'POST'})).json();
+  await refresh();
+  if(r.booking?.auto_booked){
+    toast(`Replied "${r.reply.reply_text.slice(0,32)}…" → inspection booked`);
+  } else if(r.reply){
+    toast(`Replied — ${r.booking?.intent}, routed to you`);
+  } else { toast('Sent'); }
+}
+
+async function setStatus(id, status){
+  await fetch(`/api/opportunities/${id}/status`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({status})
+  });
+  toast('Marked ' + status); refresh();
+}
+
+async function refresh(){ await Promise.all([loadStats(), loadQueue(), loadBulletin()]); renderDraft(); }
+
+// ── Results ─────────────────────────────────────────────────
+async function loadResults(){
+  const a = await (await fetch('/api/analytics')).json();
+  const f = a.funnel, base = f.identified || 1;
+  const steps = [
+    ['Opportunities', f.identified, null],
+    ['Sent', f.sent, f.sent/base],
+    ['Replied', f.responded, f.responded/base],
+    ['Booked', f.booked, f.booked/base],
+    ['Won', f.won, f.won/base],
+  ];
+  document.getElementById('funnel').innerHTML = steps.map(([k,v,p]) =>
+    `<div class="step"><dt>${k}</dt><dd>${v||0}${p!==null?`<span class="pct">${Math.round(p*100)}%</span>`:''}</dd></div>`
+  ).join('') + `
+    <div class="step"><dt>Pipeline (est.)</dt><dd style="color:var(--money)">${short(f.pipeline_est)}</dd></div>
+    <div class="step"><dt>Jobs won</dt><dd style="color:var(--money)">${short(f.revenue_won)}</dd></div>`;
+
+  document.getElementById('by-event').innerHTML =
+    `<tr><th>Storm type</th><th style="text-align:right">Opps</th>
+         <th style="text-align:right">Booked</th><th style="text-align:right">Pipeline (est.)</th>
+         <th style="text-align:right">Won</th></tr>` +
+    a.by_event.map(r => `<tr><td>${r.event_type}</td><td class="num">${r.opportunities}</td>
+      <td class="num">${r.booked}</td><td class="cash">${money(r.pipeline_est)}</td>
+      <td class="cash">${money(r.revenue_won)}</td></tr>`).join('');
+
+  const src = a.source === 'cdf_rollup'
+    ? 'Computed from the Delta change feed'
+    : 'Live query — run the gold rollup to compute this from the change feed';
+  document.getElementById('funnel-src').textContent = src;
+
+  const t = await (await fetch('/api/cdf-trail')).json();
+  document.getElementById('trail-src').textContent = t.source === 'delta_cdf'
+    ? 'Delta Change Data Feed' : 'Postgres status history — rollup not run yet';
+  document.getElementById('trail').innerHTML = t.rows.length
+    ? t.rows.map(r => `<div><span class="ts">${new Date(r.changed_at).toLocaleTimeString()}${
+        r.commit_version!=null?' v'+r.commit_version:''}</span>
+        &nbsp; ${r.name} &nbsp; ${r.old_status||'—'} <span class="arrow">→</span> ${r.new_status}</div>`).join('')
+    : '<div class="empty">No transitions captured yet. Send some outreach first.</div>';
+}
+
+// ── Ask ─────────────────────────────────────────────────────
+function openAsk(){
+  document.getElementById('scrim').classList.add('open');
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('q').focus();
+}
+function closeAsk(){
+  document.getElementById('scrim').classList.remove('open');
+  document.getElementById('drawer').classList.remove('open');
+}
+function askThis(btn){ document.getElementById('q').value = btn.textContent.trim(); runAsk(); }
+
+async function runAsk(){
+  const q = document.getElementById('q').value.trim();
+  if(!q) return;
+  const out = document.getElementById('ask-out');
+  out.innerHTML = '<div class="answer" style="color:var(--dim)">Searching your alerts and campaigns…</div>';
+
+  const r = await (await fetch('/api/ask', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question:q})
+  })).json();
+
+  if(!r.grounded){
+    out.innerHTML = `<div class="refused" style="margin-top:18px">${r.answer}</div>`;
+    return;
+  }
+  out.innerHTML = `<div class="answer">${r.answer}</div>
+    <div class="sources"><div class="section-head" style="padding:0 0 8px;border:none">
+      Retrieved sources</div>
+    ${r.sources.map(s => `<div class="src ${s.source_type}">
+      <div class="hd"><b>${s.title}</b><span class="sim">${s.similarity.toFixed(2)}</span></div>
+      <div class="txt">${s.chunk}</div></div>`).join('')}</div>`;
+}
+
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeAsk(); });
+refresh();
+setInterval(loadBulletin, 60000);
+</script>
+</body>
+</html>

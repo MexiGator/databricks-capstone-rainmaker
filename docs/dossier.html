@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rainmaker — Build Dossier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --slate-900:#0C1424; --slate-850:#111C31; --slate-800:#16233C;
+  --slate-700:#22314F; --slate-600:#31415F;
+  --paper:#E6ECF6; --muted:#8A9BB8; --dim:#5E7092;
+  --hz-critical:#D8232A; --hz-high:#F2B705; --hz-medium:#2E9E5B;
+  --money:#E8B54A; --live:#4FD4B0;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--slate-900);color:var(--paper);font-family:var(--sans);font-size:15px;line-height:1.65}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid var(--live);outline-offset:2px}
+a{color:var(--live)}
+
+header{
+  position:sticky;top:0;z-index:20;background:var(--slate-850);
+  border-bottom:1px solid var(--slate-700);padding:16px 24px 14px;
+}
+.top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;max-width:1000px;margin:0 auto}
+.wordmark{font-family:var(--mono);font-weight:600;font-size:15px;letter-spacing:.16em}
+.wordmark span{color:var(--hz-high)}
+.sub{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.count{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim)}
+
+.searchwrap{max-width:1000px;margin:12px auto 0;position:relative}
+#q{
+  width:100%;background:var(--slate-900);border:1px solid var(--slate-600);border-radius:2px;
+  padding:13px 15px 13px 40px;color:var(--paper);font-family:var(--sans);font-size:15px;
+}
+#q::placeholder{color:var(--dim)}
+.mag{position:absolute;left:14px;top:13px;color:var(--dim);font-size:15px}
+.filters{display:flex;gap:5px;flex-wrap:wrap;margin:11px auto 0;max-width:1000px}
+.f{
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  padding:5px 10px;border:1px solid var(--slate-700);border-radius:2px;color:var(--muted);
+}
+.f:hover{color:var(--paper)}
+.f[aria-pressed="true"]{background:var(--slate-800);color:var(--paper);border-color:var(--live)}
+
+main{max-width:1000px;margin:0 auto;padding:26px 24px 80px}
+.sec{
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--dim);margin:34px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--slate-700);
+}
+.sec:first-child{margin-top:0}
+
+.card{border:1px solid var(--slate-700);border-radius:2px;margin-bottom:9px;background:var(--slate-850)}
+.card > summary{
+  padding:14px 18px;cursor:pointer;list-style:none;display:flex;gap:12px;align-items:baseline;
+  font-weight:600;font-size:15.5px;
+}
+.card > summary::-webkit-details-marker{display:none}
+.card > summary::after{content:'+';color:var(--dim);margin-left:auto;font-family:var(--mono);flex:none}
+.card[open] > summary::after{content:'−'}
+.card[open] > summary{border-bottom:1px solid var(--slate-700)}
+.card:hover{border-color:var(--slate-600)}
+.body{padding:16px 18px 18px}
+.body p{margin-bottom:12px}
+.body p:last-child{margin-bottom:0}
+.body ul,.body ol{margin:0 0 12px 20px}
+.body li{margin-bottom:6px}
+.body strong{color:var(--paper)}
+.body code{font-family:var(--mono);font-size:12.5px;background:var(--slate-800);padding:1px 5px;border-radius:2px;color:var(--live)}
+.body pre{
+  font-family:var(--mono);font-size:12px;background:var(--slate-900);border:1px solid var(--slate-700);
+  padding:12px;border-radius:2px;overflow-x:auto;margin-bottom:12px;line-height:1.6;color:var(--muted)
+}
+.body pre code{background:none;padding:0;color:inherit}
+.body table{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:12px}
+.body th{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--dim);text-align:left;padding:8px 10px;border-bottom:1px solid var(--slate-700);font-weight:400
+}
+.body td{padding:8px 10px;border-bottom:1px solid var(--slate-800);vertical-align:top}
+.tldr{border-left:2px solid var(--live);padding:9px 13px;background:var(--slate-800);margin-bottom:14px;font-size:14.5px}
+.tldr b{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);display:block;margin-bottom:3px}
+.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:14px}
+.tag{font-family:var(--mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;padding:2px 6px;border:1px solid var(--slate-700);border-radius:2px;color:var(--dim)}
+mark{background:rgba(242,183,5,.28);color:var(--paper);border-radius:1px;padding:0 1px}
+
+figure{margin:4px 0 16px}
+figure svg{width:100%;height:auto;display:block;background:var(--slate-900);border:1px solid var(--slate-700);border-radius:2px}
+figcaption{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:7px;letter-spacing:.03em}
+.svg-l{font-family:'IBM Plex Mono',monospace;font-size:11px;fill:var(--paper)}
+.svg-s{font-family:'IBM Plex Mono',monospace;font-size:9px;fill:var(--dim);letter-spacing:.08em}
+.svg-t{font-family:'IBM Plex Mono',monospace;font-size:9.5px;fill:var(--muted)}
+.bx{fill:var(--slate-800);stroke:var(--slate-600);stroke-width:1}
+.bx-live{fill:#152C3E;stroke:var(--live);stroke-width:1.2}
+.bx-syn{fill:#2E2519;stroke:var(--hz-high);stroke-width:1.2}
+.bx-sim{fill:#2E1A1C;stroke:var(--hz-critical);stroke-width:1.2}
+.ln{stroke:var(--slate-600);stroke-width:1;fill:none}
+.ln-a{stroke:var(--live);stroke-width:1.4;fill:none}
+
+.none{color:var(--dim);padding:40px 0;text-align:center;font-size:14px}
+.none b{color:var(--paper)}
+@media (max-width:640px){body{font-size:14.5px}main{padding:20px 16px 60px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="top">
+    <div class="wordmark">RAIN<span>MAKER</span></div>
+    <div class="sub">Build Dossier</div>
+    <div class="count" id="count"></div>
+  </div>
+  <div class="searchwrap">
+    <span class="mag">⌕</span>
+    <input id="q" placeholder="Search — try &ldquo;why Postgres&rdquo;, &ldquo;hallucinate&rdquo;, &ldquo;spammy&rdquo;, &ldquo;scale&rdquo;" autocomplete="off">
+  </div>
+  <div class="filters" id="filters"></div>
+</header>
+
+<main id="out"></main>
+
+<script>
+// ─── Diagrams ──────────────────────────────────────────────────────
+const D = {};
+
+D.arch = `<svg viewBox="0 0 860 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="System architecture">
+<text class="svg-s" x="16" y="20">SOURCES</text>
+<rect class="bx-live" x="16" y="30" width="150" height="38" rx="2"/><text class="svg-l" x="26" y="46">api.weather.gov</text><text class="svg-t" x="26" y="60">live NWS alerts</text>
+<rect class="bx-syn" x="16" y="78" width="150" height="38" rx="2"/><text class="svg-l" x="26" y="94">synthetic CRM</text><text class="svg-t" x="26" y="108">61 customers</text>
+<rect class="bx-syn" x="16" y="126" width="150" height="38" rx="2"/><text class="svg-l" x="26" y="142">campaign corpus</text><text class="svg-t" x="26" y="156">7 past campaigns</text>
+
+<text class="svg-s" x="216" y="20">LAKEBASE · POSTGRES</text>
+<rect class="bx" x="216" y="30" width="160" height="134" rx="2"/>
+<text class="svg-t" x="228" y="50">weather_events</text><text class="svg-t" x="228" y="68">customers</text>
+<text class="svg-t" x="228" y="86">outreach_templates</text><text class="svg-t" x="228" y="104">event_service_map</text>
+<text class="svg-t" x="228" y="122">opportunities</text><text class="svg-t" x="228" y="140">corpus_embeddings</text>
+<text class="svg-t" x="228" y="158">outreach · bookings</text>
+
+<path class="ln-a" d="M166 49 H206 M166 97 H206 M166 145 H206"/>
+<circle cx="210" cy="49" r="2.5" fill="#4FD4B0"/><circle cx="210" cy="97" r="2.5" fill="#4FD4B0"/><circle cx="210" cy="145" r="2.5" fill="#4FD4B0"/>
+
+<text class="svg-s" x="426" y="20">COMPUTE</text>
+<rect class="bx" x="426" y="30" width="160" height="44" rx="2"/><text class="svg-l" x="436" y="48">Match &amp; Score</text><text class="svg-t" x="436" y="64">Spark · exposure 0–1</text>
+<rect class="bx" x="426" y="84" width="160" height="44" rx="2"/><text class="svg-l" x="436" y="102">Embed corpus</text><text class="svg-t" x="436" y="118">MiniLM → pgvector</text>
+<rect class="bx" x="426" y="138" width="160" height="58" rx="2"/><text class="svg-l" x="436" y="156">Agent · 3 tools</text><text class="svg-t" x="436" y="172">draft · send · book</text><text class="svg-t" x="436" y="188">real DB side-effects</text>
+<rect class="bx" x="426" y="206" width="160" height="44" rx="2"/><text class="svg-l" x="436" y="224">Gold rollup</text><text class="svg-t" x="436" y="240">Delta CDF → funnel</text>
+
+<path class="ln" d="M376 60 H416 M376 106 H416 M376 150 H416 M376 220 H416"/>
+<path class="ln-a" d="M586 60 C620 60 620 120 596 120" /><text class="svg-t" x="600" y="58">opportunities</text>
+
+<text class="svg-s" x="646" y="20">SURFACE</text>
+<rect class="bx" x="646" y="30" width="196" height="220" rx="2"/>
+<text class="svg-l" x="658" y="52">Storm Response console</text>
+<text class="svg-t" x="658" y="72">Flask · Databricks App</text>
+<line class="ln" x1="658" y1="84" x2="830" y2="84"/>
+<text class="svg-t" x="658" y="104">▸ bulletin strip — live alerts</text>
+<text class="svg-t" x="658" y="122">▸ ranked opportunity queue</text>
+<text class="svg-t" x="658" y="140">▸ draft panel + grounding</text>
+<text class="svg-t" x="658" y="158">▸ Ask — RAG over both corpora</text>
+<line class="ln" x1="658" y1="172" x2="830" y2="172"/>
+<text class="svg-t" x="658" y="192">▸ Results — funnel, pipeline</text>
+<text class="svg-t" x="658" y="210">▸ CDF change-record trail</text>
+<text class="svg-t" x="658" y="234">one app · two tabs</text>
+
+<path class="ln-a" d="M586 168 H636"/><path class="ln-a" d="M586 228 H636"/>
+
+<text class="svg-s" x="16" y="290">REQUIREMENTS</text>
+<line class="ln" x1="16" y1="300" x2="842" y2="300"/>
+<text class="svg-t" x="16" y="322">1 · Spark → match_and_score.py</text>
+<text class="svg-t" x="300" y="322">2 · Real API → weather_client.py</text>
+<text class="svg-t" x="580" y="322">3 · Unstructured → embed_corpus.py</text>
+<text class="svg-t" x="16" y="344">4 · App → app/</text>
+<text class="svg-t" x="300" y="344">5 · Agent 3 tools → agent/tools.py</text>
+<text class="svg-t" x="580" y="344">6 · CDC → gold_rollup.py</text>
+<text class="svg-t" x="16" y="378">Green = live external data · Amber = synthetic · Grey = infrastructure</text>
+</svg>`;
+
+D.schema = `<svg viewBox="0 0 860 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Schema map">
+<text class="svg-s" x="16" y="18">SEEDED · STATIC</text>
+<rect class="bx-syn" x="16" y="28" width="176" height="96" rx="2"/>
+<text class="svg-l" x="26" y="46">customers</text>
+<text class="svg-t" x="26" y="63">customer_id  PK</text><text class="svg-t" x="26" y="78">lat · lon · service_type</text>
+<text class="svg-t" x="26" y="93">est_job_value · tier</text><text class="svg-t" x="26" y="108">is_prospect · tenant</text>
+<text class="svg-t" x="26" y="120" fill="#F2B705">61 rows · 6 tenants</text>
+
+<rect class="bx-syn" x="16" y="140" width="176" height="66" rx="2"/>
+<text class="svg-l" x="26" y="158">event_service_map</text>
+<text class="svg-t" x="26" y="175">event_type + service  PK</text><text class="svg-t" x="26" y="190">urgency_weight 0–1</text>
+<text class="svg-t" x="26" y="202" fill="#F2B705">17 rows · many-to-many</text>
+
+<rect class="bx-syn" x="16" y="222" width="176" height="66" rx="2"/>
+<text class="svg-l" x="26" y="240">outreach_templates</text>
+<text class="svg-t" x="26" y="257">template_id  PK</text><text class="svg-t" x="26" y="272">message_text · booked_rate</text>
+<text class="svg-t" x="26" y="284" fill="#F2B705">7 rows · the RAG corpus</text>
+
+<text class="svg-s" x="242" y="18">LIVE · PIPELINE-WRITTEN</text>
+<rect class="bx-live" x="242" y="28" width="180" height="96" rx="2"/>
+<text class="svg-l" x="252" y="46">weather_events</text>
+<text class="svg-t" x="252" y="63">event_id  PK (NWS id)</text><text class="svg-t" x="252" y="78">lat · lon · radius_km</text>
+<text class="svg-t" x="252" y="93">severity · event_type</text><text class="svg-t" x="252" y="108">narrative_text</text>
+<text class="svg-t" x="252" y="120" fill="#4FD4B0">real · dedup on event_id</text>
+
+<rect class="bx-live" x="242" y="222" width="180" height="66" rx="2"/>
+<text class="svg-l" x="252" y="240">corpus_embeddings</text>
+<text class="svg-t" x="252" y="257">source_type + id + chunk</text><text class="svg-t" x="252" y="272">vector(384) · hnsw</text>
+<text class="svg-t" x="252" y="284" fill="#4FD4B0">one index, both corpora</text>
+
+<rect class="bx" x="470" y="88" width="182" height="112" rx="2"/>
+<text class="svg-l" x="480" y="106">opportunities</text>
+<text class="svg-t" x="480" y="123">opportunity_id  PK</text>
+<text class="svg-t" x="480" y="138">= sha1(event|customer)</text>
+<text class="svg-t" x="480" y="155">exposure_score · priority</text><text class="svg-t" x="480" y="170">est_value · status</text>
+<text class="svg-t" x="480" y="188">UNIQUE (event, customer)</text>
+
+<path class="ln-a" d="M192 76 C220 76 220 120 240 120"/>
+<path class="ln-a" d="M422 76 C450 76 450 110 466 110"/>
+<path class="ln-a" d="M192 173 C300 173 300 145 466 145"/>
+
+<text class="svg-s" x="700" y="18">AGENT + APP WRITES</text>
+<rect class="bx" x="700" y="28" width="146" height="52" rx="2"/>
+<text class="svg-l" x="710" y="46">outreach</text><text class="svg-t" x="710" y="62">message · template_id</text><text class="svg-t" x="710" y="75">similarity · sent_at</text>
+
+<rect class="bx" x="700" y="94" width="146" height="52" rx="2"/>
+<text class="svg-l" x="710" y="112">inbound_replies</text><text class="svg-t" x="710" y="128">reply_text · intent</text><text class="svg-t" x="710" y="141">intent_conf</text>
+
+<rect class="bx" x="700" y="160" width="146" height="52" rx="2"/>
+<text class="svg-l" x="710" y="178">bookings</text><text class="svg-t" x="710" y="194">proposed_slot · est_value</text><text class="svg-t" x="710" y="207">won_value (only if won)</text>
+
+<rect class="bx" x="700" y="226" width="146" height="52" rx="2"/>
+<text class="svg-l" x="710" y="244">status_history</text><text class="svg-t" x="710" y="260">old → new · changed_at</text><text class="svg-t" x="710" y="273">appended by TRIGGER</text>
+
+<path class="ln" d="M652 120 C676 120 676 54 696 54"/>
+<path class="ln" d="M652 128 H696"/>
+<path class="ln" d="M652 140 C676 140 676 186 696 186"/>
+<path class="ln" d="M652 160 C676 160 676 252 696 252"/>
+
+<text class="svg-s" x="16" y="330">ANALYTICS · WRITTEN BY THE CDF ROLLUP</text>
+<line class="ln" x1="16" y1="340" x2="842" y2="340"/>
+<rect class="bx" x="16" y="356" width="180" height="58" rx="2"/>
+<text class="svg-l" x="26" y="374">gold_results</text><text class="svg-t" x="26" y="390">grain: overall | event_type</text><text class="svg-t" x="26" y="404">funnel + pipeline + won</text>
+
+<rect class="bx" x="212" y="356" width="180" height="58" rx="2"/>
+<text class="svg-l" x="222" y="374">cdf_audit</text><text class="svg-t" x="222" y="390">change_type · new_status</text><text class="svg-t" x="222" y="404">commit_version · commit_ts</text>
+
+<rect class="bx" x="408" y="356" width="180" height="58" rx="2"/>
+<text class="svg-l" x="418" y="374">cdf_checkpoint</text><text class="svg-t" x="418" y="390">last_version read</text><text class="svg-t" x="418" y="404">so each run reads only new</text>
+
+<text class="svg-t" x="612" y="380">Delta table with</text>
+<text class="svg-t" x="612" y="396">enableChangeDataFeed = true</text>
+<text class="svg-t" x="612" y="412">is the source for all three</text>
+<text class="svg-t" x="16" y="448">Amber = synthetic seed · Green = real external data · Grey = derived</text>
+</svg>`;
+
+D.lifecycle = `<svg viewBox="0 0 860 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Opportunity lifecycle">
+<text class="svg-s" x="16" y="20">OPPORTUNITY STATUS — AND WHO WRITES EACH TRANSITION</text>
+
+<rect class="bx" x="16" y="46" width="112" height="46" rx="2"/><text class="svg-l" x="26" y="66">identified</text><text class="svg-t" x="26" y="82">Spark</text>
+<rect class="bx" x="164" y="46" width="112" height="46" rx="2"/><text class="svg-l" x="174" y="66">drafted</text><text class="svg-t" x="174" y="82">Tool 1</text>
+<rect class="bx" x="312" y="46" width="112" height="46" rx="2"/><text class="svg-l" x="322" y="66">sent</text><text class="svg-t" x="322" y="82">Tool 2</text>
+<rect class="bx" x="460" y="46" width="112" height="46" rx="2"/><text class="svg-l" x="470" y="66">responded</text><text class="svg-t" x="470" y="82">Tool 3</text>
+<rect class="bx-live" x="608" y="46" width="112" height="46" rx="2"/><text class="svg-l" x="618" y="66">booked</text><text class="svg-t" x="618" y="82">Tool 3 · appt</text>
+
+<path class="ln-a" d="M128 69 H160"/><path class="ln-a" d="M276 69 H308"/>
+<path class="ln-a" d="M424 69 H456"/><path class="ln-a" d="M572 69 H604"/>
+<polygon points="160,69 154,66 154,72" fill="#4FD4B0"/><polygon points="308,69 302,66 302,72" fill="#4FD4B0"/>
+<polygon points="456,69 450,66 450,72" fill="#4FD4B0"/><polygon points="604,69 598,66 598,72" fill="#4FD4B0"/>
+
+<path class="ln-a" d="M516 92 C516 120 640 120 664 96"/><text class="svg-t" x="530" y="118">confident yes → skips straight to booked</text>
+
+<rect class="bx-syn" x="608" y="150" width="112" height="46" rx="2"/><text class="svg-l" x="618" y="170">quoted</text><text class="svg-t" x="618" y="186">human</text>
+<rect class="bx-syn" x="740" y="150" width="102" height="46" rx="2"/><text class="svg-l" x="750" y="170">won</text><text class="svg-t" x="750" y="186">human</text>
+<path class="ln" d="M664 92 V146"/><polygon points="664,146 661,140 667,140" fill="#31415F"/>
+<path class="ln" d="M720 173 H736"/><polygon points="736,173 730,170 730,176" fill="#31415F"/>
+
+<rect class="bx" x="460" y="150" width="112" height="46" rx="2"/><text class="svg-l" x="470" y="170">lost</text><text class="svg-t" x="470" y="186">human</text>
+<path class="ln" d="M516 92 V146"/><polygon points="516,146 513,140 519,140" fill="#31415F"/>
+
+<line class="ln" x1="16" y1="222" x2="842" y2="222"/>
+<text class="svg-t" x="16" y="244">Green = the agent acts autonomously.  Amber = a human decides.</text>
+<text class="svg-t" x="16" y="264">The agent stops at booked — whether a job sells is decided on site, and the system cannot observe that.</text>
+</svg>`;
+
+D.score = `<svg viewBox="0 0 860 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Exposure score anatomy">
+<text class="svg-s" x="16" y="20">EXPOSURE = SEVERITY × PROXIMITY × URGENCY × VALUE  →  0..1</text>
+
+<rect class="bx" x="16" y="40" width="182" height="94" rx="2"/>
+<text class="svg-l" x="26" y="60">severity</text><text class="svg-t" x="26" y="78">Extreme  1.00</text><text class="svg-t" x="26" y="93">Severe   0.85</text>
+<text class="svg-t" x="26" y="108">Moderate 0.60</text><text class="svg-t" x="26" y="123">Minor    0.35</text>
+
+<rect class="bx" x="222" y="40" width="182" height="94" rx="2"/>
+<text class="svg-l" x="232" y="60">proximity</text><text class="svg-t" x="232" y="78">centre       1.00</text><text class="svg-t" x="232" y="93">footprint edge 0.50</text>
+<text class="svg-t" x="232" y="108">+40 km beyond  0.00</text><text class="svg-t" x="232" y="123">no polygon     0.50</text>
+
+<rect class="bx" x="428" y="40" width="182" height="94" rx="2"/>
+<text class="svg-l" x="438" y="60">urgency</text><text class="svg-t" x="438" y="78">from event_service_map</text><text class="svg-t" x="438" y="93">freeze→plumbing 0.95</text>
+<text class="svg-t" x="438" y="108">freeze→roofing  0.55</text><text class="svg-t" x="438" y="123">heat→roofing    n/a</text>
+
+<rect class="bx" x="634" y="40" width="182" height="94" rx="2"/>
+<text class="svg-l" x="644" y="60">value</text><text class="svg-t" x="644" y="78">job value / $30k cap</text><text class="svg-t" x="644" y="93">+ platinum 0.15</text>
+<text class="svg-t" x="644" y="108">+ gold     0.07</text><text class="svg-t" x="644" y="123">prospects use est_job_value</text>
+
+<text class="svg-l" x="204" y="94">×</text><text class="svg-l" x="410" y="94">×</text><text class="svg-l" x="616" y="94">×</text>
+
+<line class="ln" x1="16" y1="158" x2="842" y2="158"/>
+<text class="svg-s" x="16" y="182">WORKED EXAMPLE — PLATINUM ROOFING CUSTOMER, $28K JOB</text>
+
+<rect class="bx-live" x="16" y="196" width="400" height="60" rx="2"/>
+<text class="svg-t" x="26" y="216">2 km from an Extreme tornado warning</text>
+<text class="svg-l" x="26" y="238" fill="#4FD4B0">1.00 × 0.98 × 1.00 × 1.00  =  0.98   critical</text>
+
+<rect class="bx-sim" x="440" y="196" width="400" height="60" rx="2"/>
+<text class="svg-t" x="450" y="216">800 km from the same warning</text>
+<text class="svg-l" x="450" y="238" fill="#D8232A">1.00 × 0.00 × 1.00 × 1.00  =  0.00   filtered</text>
+
+<text class="svg-t" x="16" y="286">Multiplicative on purpose: any factor at zero kills the row. An additive score would still rank the distant</text>
+<text class="svg-t" x="16" y="304">platinum customer near the top on value alone. Rows below 0.25 never reach the queue.</text>
+<text class="svg-t" x="16" y="328">Bands — critical ≥ 0.70 · high ≥ 0.50 · medium ≥ 0.30 · low below</text>
+</svg>`;
+
+D.rag = `<svg viewBox="0 0 860 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RAG pipeline">
+<text class="svg-s" x="16" y="20">INGESTION — RUN ONCE PER NEW TEXT</text>
+<rect class="bx-live" x="16" y="32" width="140" height="48" rx="2"/><text class="svg-l" x="26" y="52">NWS narrative</text><text class="svg-t" x="26" y="68">hazard + safety prose</text>
+<rect class="bx-syn" x="16" y="88" width="140" height="48" rx="2"/><text class="svg-l" x="26" y="108">campaign copy</text><text class="svg-t" x="26" y="124">+ booked rate in text</text>
+
+<rect class="bx" x="192" y="56" width="126" height="56" rx="2"/><text class="svg-l" x="202" y="76">chunk</text><text class="svg-t" x="202" y="92">450 chars</text><text class="svg-t" x="202" y="105">80 overlap</text>
+<rect class="bx" x="354" y="56" width="126" height="56" rx="2"/><text class="svg-l" x="364" y="76">embed</text><text class="svg-t" x="364" y="92">all-MiniLM-L6-v2</text><text class="svg-t" x="364" y="105">384 dims, normalised</text>
+<rect class="bx" x="516" y="56" width="150" height="56" rx="2"/><text class="svg-l" x="526" y="76">corpus_embeddings</text><text class="svg-t" x="526" y="92">pgvector · hnsw</text><text class="svg-t" x="526" y="105">ONE index, both sources</text>
+
+<path class="ln-a" d="M156 56 C176 56 172 84 188 84"/><path class="ln-a" d="M156 112 C176 112 172 84 188 84"/>
+<path class="ln-a" d="M318 84 H350"/><path class="ln-a" d="M480 84 H512"/>
+
+<line class="ln" x1="16" y1="146" x2="842" y2="146"/>
+<text class="svg-s" x="16" y="170">QUERY — EVERY ASK AND EVERY DRAFT</text>
+
+<rect class="bx" x="16" y="182" width="126" height="48" rx="2"/><text class="svg-l" x="26" y="202">question</text><text class="svg-t" x="26" y="218">or hazard + service</text>
+<rect class="bx" x="164" y="182" width="126" height="48" rx="2"/><text class="svg-l" x="174" y="202">embed</text><text class="svg-t" x="174" y="218">SAME model</text>
+<rect class="bx" x="312" y="182" width="140" height="48" rx="2"/><text class="svg-l" x="322" y="202">cosine rank</text><text class="svg-t" x="322" y="218">1 − (embedding &lt;=&gt; q)</text>
+<rect class="bx" x="474" y="182" width="140" height="48" rx="2"/><text class="svg-l" x="484" y="202">floor 0.35</text><text class="svg-t" x="484" y="218">below → refuse</text>
+
+<rect class="bx-live" x="636" y="160" width="206" height="44" rx="2"/><text class="svg-l" x="646" y="180">ground + generate</text><text class="svg-t" x="646" y="195">context block → LLM → answer + sources</text>
+<rect class="bx-sim" x="636" y="212" width="206" height="44" rx="2"/><text class="svg-l" x="646" y="232">refuse — no model call</text><text class="svg-t" x="646" y="247">an empty context is not a guardrail</text>
+
+<path class="ln-a" d="M142 206 H160"/><path class="ln-a" d="M290 206 H308"/><path class="ln-a" d="M452 206 H470"/>
+<path class="ln-a" d="M614 206 C626 206 626 182 632 182"/>
+<path class="ln" d="M614 206 C626 206 626 234 632 234" stroke="#D8232A"/>
+
+<text class="svg-t" x="16" y="284">The test for whether this is real RAG: delete the corpus and does the output get worse? Here, yes —</text>
+<text class="svg-t" x="16" y="302">&ldquo;what wording books hail jobs&rdquo; is answerable only from this company&rsquo;s campaigns and their measured rates.</text>
+</svg>`;
+
+D.credibility = `<svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Real, synthetic and simulated">
+<text class="svg-s" x="16" y="20">WHAT IS REAL, WHAT IS NOT — STATED PLAINLY</text>
+
+<rect class="bx-live" x="16" y="34" width="266" height="200" rx="2"/>
+<text class="svg-l" x="28" y="56" fill="#4FD4B0">REAL</text>
+<text class="svg-t" x="28" y="80">▸ NWS alerts + narrative text</text>
+<text class="svg-t" x="28" y="100">▸ Spark scoring pipeline</text>
+<text class="svg-t" x="28" y="120">▸ vector index + every retrieval</text>
+<text class="svg-t" x="28" y="140">▸ all 3 agent tools + their writes</text>
+<text class="svg-t" x="28" y="160">▸ reply classification</text>
+<text class="svg-t" x="28" y="180">▸ booking creation</text>
+<text class="svg-t" x="28" y="200">▸ Delta CDF + gold rollup</text>
+<text class="svg-t" x="28" y="222" fill="#4FD4B0">load-bearing: no alerts, no product</text>
+
+<rect class="bx-syn" x="298" y="34" width="266" height="200" rx="2"/>
+<text class="svg-l" x="310" y="56" fill="#F2B705">SYNTHETIC</text>
+<text class="svg-t" x="310" y="80">▸ the CRM — 61 customers</text>
+<text class="svg-t" x="310" y="100">▸ 6 regional tenants</text>
+<text class="svg-t" x="310" y="120">▸ 7 campaign templates</text>
+<text class="svg-t" x="310" y="148">Real customer data cannot be used.</text>
+<text class="svg-t" x="310" y="168">Placement is not arbitrary — each</text>
+<text class="svg-t" x="310" y="188">tenant sits where its hazard occurs,</text>
+<text class="svg-t" x="310" y="208">so some alert is always live over</text>
+<text class="svg-t" x="310" y="222" fill="#F2B705">someone&rsquo;s footprint.</text>
+
+<rect class="bx-sim" x="580" y="34" width="262" height="200" rx="2"/>
+<text class="svg-l" x="592" y="56" fill="#D8232A">SIMULATED</text>
+<text class="svg-t" x="592" y="80">▸ inbound customer replies only</text>
+<text class="svg-t" x="592" y="108">Production uses Twilio inbound.</text>
+<text class="svg-t" x="592" y="128">Seeded, not random — take three</text>
+<text class="svg-t" x="592" y="148">behaves like take one.</text>
+<text class="svg-t" x="592" y="176">Everything downstream of the reply</text>
+<text class="svg-t" x="592" y="196">is real code doing real work:</text>
+<text class="svg-t" x="592" y="216" fill="#D8232A">classify → book → write → capture</text>
+
+<line class="ln" x1="16" y1="256" x2="842" y2="256"/>
+<text class="svg-t" x="16" y="280">Volunteering this is stronger than having someone discover it. Precision about what works is more credible than silence.</text>
+</svg>`;
+
+// ─── Content ───────────────────────────────────────────────────────
+const CARDS = [
+{s:"Safety first",q:"What is the storm safety notice?",t:["business","ethics","pitch","engineering"],
+ k:"safety notice help first goodwill duty of care public service predatory spammy value before ask",
+ tldr:"The first message Rainmaker ever sends anyone is official NWS safety guidance, with no ask attached. It is a hard gate, not a slogan.",
+ b:`<p>Every NWS alert ships with an <code>instruction</code> block — official safety guidance written by a meteorologist. Rainmaker already ingests it; the safety notice puts it to work.</p>
+<p>The message contains what is happening and until when, the NWS guidance <strong>verbatim</strong>, a short list of things worth checking on the property once it passes, and an opt-out. No booking, no pitch, no call to action — there are tests asserting the words "inspection", "book", "schedule", "quote" and "free" never appear.</p>
+<p>Commercial outreach is <strong>gated</strong> on this having been sent. Tool 1 refuses to draft until it has.</p>`},
+
+{s:"Safety first",q:"Why does the safety notice make no LLM call at all?",t:["engineering","ethics","reliability","agent"],
+ k:"hallucinate safety generated guidance liability dangerous advice deterministic no model call",
+ tldr:"An LLM inventing storm safety advice is one hallucination away from telling someone to go outside during a tornado warning.",
+ b:`<p>The single strongest design decision in the feature. Safety content is composed from two non-generative sources:</p>
+<ul>
+<li><strong>The NWS instruction field, verbatim.</strong> NWS output is a work of the US federal government and is public domain, so quoting it in full is both legal and correct. Paraphrasing official safety guidance would be worse, not better.</li>
+<li><strong>A curated property checklist</strong>, written once and reviewed, keyed by service line and hazard.</li>
+</ul>
+<p>Two benefits fall out of it: the notice still sends when the model endpoint is slow or down, and the whole module is testable without a database or a network.</p>
+<p>The only text processing is whitespace collapsing — NWS products are teletype, hard-wrapped mid-sentence at 66 columns. That is formatting, not editing. And trimming always cuts at a sentence boundary, because "move to an interior room and" is a dangerous fragment.</p>`},
+
+{s:"Safety first",q:"What should a message like this actually sound like?",t:["business","ethics","pitch","product"],
+ k:"tone voice personality warmth copy CX customer experience friendly robotic sound like brand",
+ tldr:"Warmth has to scale DOWN as the hazard scales up. A fixed friendly register reads as automated exactly when trust matters most.",
+ b:`<p>Three principles drive the copy:</p>
+<ol>
+<li><strong>Answer "who is this?" in the first six words.</strong> That is the number one anxiety with a text from an unknown number. Every notice opens <em>"Hi Marcus — this is Dana with Summit Exteriors."</em></li>
+<li><strong>Sign it with the real assigned rep</strong>, not a persona. Inventing a friendly mascot is warmer for one message and awkward the moment the customer calls back and asks for someone who does not exist. The CRM already has <code>assigned_rep</code>.</li>
+<li><strong>Attribute the alert to NWS, not to us.</strong> "The National Weather Service has issued…" — we are the messenger, and saying so is both accurate and more trustworthy.</li>
+</ol>
+<p>There is also a test asserting <strong>no exclamation marks in our own copy</strong>. NWS text may contain them ("TAKE COVER NOW!"); ours must not, because an exclamation mark in a storm message reads as chirpy.</p>`},
+
+{s:"Safety first",q:"Why does the tone change with severity?",t:["product","ethics","engineering"],
+ k:"tone tier urgent gentle severity voice register tone deaf appropriate",
+ tldr:"'Hope you and your family are doing well' is kind during a heat advisory and tone-deaf during an active tornado warning.",
+ b:`<p>Three registers, selected by <code>tone_tier(severity, active)</code>:</p>
+<table><tr><th>Tier</th><th>When</th><th>What changes</th></tr>
+<tr><td><strong>urgent</strong></td><td>Extreme severity, still active</td><td>No pleasantries. Property checklist deferred — not the moment to hand someone a to-do list about their gutters. Closes "we'll check in once this has passed."</td></tr>
+<tr><td><strong>standard</strong></td><td>Severe, or an expired Extreme</td><td>"Hope you and your family are safe." Full structure with checklist.</td></tr>
+<tr><td><strong>gentle</strong></td><td>Moderate and below</td><td>Warmest register. "Take care, and give us a shout if we can help."</td></tr></table>
+<p>Note that an <em>expired</em> Extreme alert reads as standard, not urgent — a passed tornado warning is a cleanup conversation, not an emergency one.</p>
+<p>The urgent notice is measurably shorter, and there's a test asserting that.</p>`},
+
+{s:"Safety first",q:"What are the rules of the commercial gate?",t:["engineering","ethics","agent"],
+ k:"gate blocked rules cannot sell tornado active severity sequencing order refuse",
+ b:`<p>Two rules, checked in order by <code>safety.commercial_allowed</code>:</p>
+<ol>
+<li><strong>A safety notice must have gone first.</strong> Sequencing, not timing — so it is always demonstrable and never depends on what the weather happens to be doing.</li>
+<li><strong>No selling during an ACTIVE Extreme-severity event.</strong> Extreme means tornado, hurricane, or equivalent. Nobody wants a roofing quote while the tornado is still on the ground.</li>
+</ol>
+<p>Only Extreme blocks on rule 2 — a severe thunderstorm warning is not a life-threatening in-progress event in the same sense, and blocking on it would make the tool unusable.</p>
+<p>The gate returns a human-readable reason, surfaced in the UI rather than failing silently. Unparseable timestamps <em>fail open</em>, because a malformed date should not lock a customer out of outreach forever.</p>`},
+
+{s:"Safety first",q:"What did a senior CX review change about the copy?",t:["product","business","ethics","pitch"],
+ k:"CX customer experience review copy critique filler pleasantry improve second pass tone voice",
+ tldr:"Five things: cut the filler, answer why-am-I-getting-this, open the door instead of closing it, keep the promise you made, and respect quiet hours.",
+ b:`<p>The first version read fine and would not have survived a senior review. What changed:</p>
+<ol>
+<li><strong>Cut "Hope you and your family are safe."</strong> It is the SMS equivalent of "I hope this email finds you well" — it occupied the most valuable line in the message and did no work.</li>
+<li><strong>Answered "why am I getting this?"</strong> — question two after "who is this", and the first version ignored it. A nine-year customer and a stranger got identical copy. Now a customer hears <em>"You've been with us since 2019"</em> and a prospect hears <em>"We work around Fort Worth and you're in the path of this one."</em></li>
+<li><strong>Replaced "no need to reply" with an open door.</strong> The old footer discouraged contact two lines after inviting it — and the discouraging half reaches exactly the person in trouble.</li>
+<li><strong>Tracked the promise.</strong> The urgent tier says "I'll follow up once it's clear." Nothing was tracking that.</li>
+<li><strong>Added quiet hours.</strong> A heat advisory notice at 3am destroys more trust than it protects.</li>
+</ol>
+<p>There is a test, <code>test_no_filler_pleasantries_anywhere</code>, that fails the build if "hope this finds you", "just wanted to reach out" or similar creep back in.</p>`},
+
+{s:"Safety first",q:"What is the open door, and why does it matter more than the checklist?",t:["product","business","ethics","pitch"],
+ k:"help line phone number call us free no charge reciprocity goodwill open door reply",
+ tldr:"Offering help is not selling. It is the single most valuable line in the message and costs nothing unless someone actually needs it.",
+ b:`<p>Every standard and gentle notice ends with a real way to reach a real person:</p>
+<blockquote><em>"If you end up with water coming in, call (817) 555-0142 and ask for Dana — day or night, and there's no charge to come look."</em></blockquote>
+<p>Three things make this work rather than read as a pitch: the trouble sign is <strong>service-specific</strong> ("a pipe let go" for plumbing, "the system quit" for HVAC), it names <strong>the actual rep</strong>, and it is contingent — it only costs the business anything if the customer genuinely has a problem.</p>
+<p>A safety notice that offers help without a phone number is a gesture, not help. There is a test asserting the number is present.</p>
+<p>The urgent tier deliberately omits it: mid-tornado, a phone number is one more thing to read.</p>`},
+
+{s:"Safety first",q:"How do you make sure a promise in a message gets kept?",t:["product","engineering","ethics","reliability"],
+ k:"promise follow up check in commitment unkept broken trust accountability",
+ tldr:"The urgent notice says 'I'll follow up once it's clear.' That due time is written to the database and surfaced in the console, not trusted to memory.",
+ b:`<p><code>outreach.follow_up_due</code> is set when the notice makes the promise, and <code>pending_follow_ups()</code> lists everything past due and unfulfilled. The console shows the queue.</p>
+<p><strong>The important constraint:</strong> a follow-up is fulfilled by a second <em>safety</em> message, never by the commercial draft. Using a sales pitch to satisfy a safety promise is a bait and switch, and it is the exact move that makes storm-chasing outreach feel predatory.</p>
+<p>An unkept promise is worse than no promise. The alternative — never promising — would have been the safer engineering choice and a worse customer experience.</p>`},
+
+{s:"Safety first",q:"What about sending at 3am?",t:["product","ethics","engineering","limits"],
+ k:"quiet hours 3am night timing TCPA when to send overnight sleep disturb",
+ tldr:"Quiet hours apply to the gentle tier only. A hazard serious enough for the standard or urgent tier outranks a good night's sleep.",
+ b:`<p>A heat advisory notice at 3am is a trust-destroying event and a plausible TCPA complaint. An active tornado warning at 3am is exactly when someone needs waking up. Treating those the same would be wrong in one direction or the other.</p>
+<p><code>hold_for_quiet_hours</code> holds gentle-tier notices between 9pm and 8am local, using a coarse state-to-offset map — deliberately coarse, because we only need to know roughly whether it is the middle of the night.</p>
+<p>An unknown state <strong>fails open</strong> and sends. Silently withholding a safety message because we could not determine a timezone would be the worse failure.</p>
+<p>A test asserts every state present in the CRM has a timezone entry, so a new region cannot silently lose quiet-hour protection.</p>`},
+
+{s:"Safety first",q:"Doesn't the safety notice inflate your funnel numbers?",t:["engineering","credibility","pitch"],
+ k:"funnel metrics inflate honest counting sent gaming numbers vanity metric",
+ tldr:"No — it deliberately does not advance the opportunity status, so it never counts as outreach sent.",
+ b:`<p><code>send_safety_notice</code> writes an <code>outreach</code> row with <code>kind = 'safety'</code> and then stops. It does not touch the opportunity status.</p>
+<p>A deliberate choice: counting a safety notice as a funnel step would make the sent number look better while meaning less — and the whole point of the feature is that it is not a sales touch.</p>
+<p>The console shows safety notices as their own stat, next to but separate from outreach sent.</p>`},
+
+{s:"Problem & product",q:"What problem does Rainmaker solve?",k:"problem pain point why now market opportunity elevator pitch what is this",t:["business","pitch"],
+ tldr:"A hailstorm hits and the company that books the work is the one that reached out first. Today that's manual.",
+ b:`<p>A hailstorm crosses Tarrant County. Roofers find out the same way everyone else does — a customer calls.</p>
+<p>Today that outreach is manual: someone with a laptop, a radar app, and a spreadsheet, working the phones until the storm's news cycle passes. It's slow, it misses most of the affected list, and it competes against door-knockers who showed up in person within hours.</p>
+<p>Rainmaker turns that scramble into a <strong>ranked queue and a one-click loop</strong>.</p>`},
+
+{s:"Problem & product",q:"Who is it for?",k:"customer persona target market ICP buyer user audience who pays",t:["business","pitch"],
+ b:`<p>Regional home-services companies — roofing, plumbing, HVAC, water restoration — with an existing customer list and a small office staff.</p>
+<p>The user is an office manager or sales lead, <strong>not a data engineer</strong>. Six synthetic tenants model this in the demo, each with a real hazard footprint.</p>`},
+
+{s:"Problem & product",q:"What does it actually do, end to end?",t:["business","pitch","engineering"],
+ fig:D.arch,cap:"System architecture — sources through to the console. Green is live external data, amber is synthetic.",
+ b:`<ol>
+<li>Polls live NWS alerts for the states where the company has customers.</li>
+<li>Matches each storm footprint against the CRM — customers <em>and</em> prospects.</li>
+<li>Scores every pair for exposure: how bad, how close, does this hazard drive this service line, is this customer worth calling first.</li>
+<li>Ranks them into a queue.</li>
+<li>Drafts outreach grounded in the past campaign that actually booked jobs for this hazard.</li>
+<li>The analyst approves and sends.</li>
+<li>When the customer replies, the agent classifies it and books the inspection.</li>
+<li>Every status transition is captured and rolled up into a funnel.</li>
+</ol>`},
+
+{s:"Problem & product",q:"Why weather? Why not some other demand signal?",k:"why weather signal trigger market timing causal correlation demand",t:["business","pitch"],
+ tldr:"It's causal rather than correlative, free and continuous, and time-boxed — which is what makes being first worth paying for.",
+ b:`<ul>
+<li><strong>Causal, not correlative.</strong> Hail damages roofs. There's no inference gap to defend.</li>
+<li><strong>Free, real, continuous.</strong> api.weather.gov — no key, no rate-limit negotiation, always something happening somewhere.</li>
+<li><strong>Time-boxed.</strong> Insurance claim windows typically close about a year after the storm date, and door-knockers arrive within days.</li>
+</ul>
+<p>That last one is the commercial point. Being first is worth money, which is what makes the product worth paying for.</p>`},
+
+{s:"Problem & product",q:"Isn't this just a mail merge with extra steps?",k:"spammy spam blast bulk sms differentiation differentiated novel just an llm wrapper thin wrapper commodity",t:["business","pitch","engineering"],
+ tldr:"The list is computed rather than chosen, the copy is retrieved rather than templated, and the loop closes at a booking.",
+ b:`<ul>
+<li><strong>The list is computed, not chosen.</strong> Exposure scoring ranks every customer against every live alert and returns the handful worth calling. Nobody picked them.</li>
+<li><strong>The copy is retrieved, not templated.</strong> The agent searches past campaigns for the one that actually booked for this hazard and service line. A template doesn't improve because a different campaign worked last month; this does.</li>
+<li><strong>The loop closes.</strong> A mail merge ends at send. This reads the reply, classifies it, and writes a booking.</li>
+</ul>
+<p>The honest version: strip the retrieval and the reply handling and you'd have a smart mail merge. Those two pieces are the product.</p>`},
+
+{s:"Problem & product",q:"Is texting homeowners right after a storm predatory?",k:"spammy spam creepy pushy ambulance chasing storm chaser sleazy ethical ethics consent TCPA opt out unsubscribe privacy GDPR permission cold outreach harassment",t:["business","ethics","pitch"],
+ tldr:"What makes storm-chasing predatory is claiming unverified damage, manufacturing urgency, cold lists, and hard exits. The system is built against all four.",
+ b:`<p>Worth a real answer, because it's the sharpest question you'll get.</p>
+<p><strong>The strongest answer is structural: the first message anyone receives is a storm safety notice — official NWS guidance, verbatim, with no ask attached.</strong> Commercial outreach is gated on it having gone first. We lead with help, and that is enforced in code rather than promised in a deck.</p>
+<ul>
+<li><strong>The prompt forbids claiming damage occurred.</strong> It says the property is worth checking. No invented statistics, prices, or dates — an explicit rule.</li>
+<li><strong>The urgency is real and external.</strong> Claim windows and the physics of unaddressed water intrusion aren't manufactured by the seller.</li>
+<li><strong>The list is the company's own customers and prospects</strong>, not a purchased one.</li>
+<li><strong>Opt-out is a hard stop before any scoring.</strong> "Sounds great, but stop texting me" classifies as a decline with confidence 1.0. Five tests cover that path alone.</li>
+</ul>
+<p>The unresolved tension: a homeowner who didn't ask to be contacted still gets a text. That's a real cost — the same cost as any outbound sales motion, reduced rather than eliminated by targeting people who plausibly need the service and making the exit trivial.</p>`},
+
+{s:"Architecture",q:"Why both Lakebase (Postgres) and Delta? Isn't one enough?",t:["engineering","architecture","databricks"],
+ tldr:"OLTP and OLAP do different jobs. The console needs click-speed writes; analytics needs a change feed. Neither store does the other's job well.",
+ b:`<ul>
+<li><strong>Lakebase is the operational store.</strong> The console needs single-row reads and writes at click speed. A user changes a status and expects it reflected immediately.</li>
+<li><strong>Delta is the analytics store.</strong> Change Data Feed, versioned history, columnar scans.</li>
+</ul>
+<p>Running the console off Delta would make every click slow. Running analytics off Postgres would mean no change feed. The round trip is the honest architecture, not a workaround — it's the same split on the Day 1 architecture slide.</p>`},
+
+{s:"Architecture",q:"Why does Spark write to Delta and then sync to Postgres?",t:["engineering","architecture","databricks"],
+ b:`<p>Serverless Databricks can't do a Spark JDBC write to Lakebase. So Spark owns the computation and Delta, and a small <code>psycopg2</code> upsert moves the result into the operational store.</p>
+<p>This turned out better than a direct write: Delta becomes the lineage record of what the pipeline computed, and Postgres holds what the humans then did to it. Two different facts in two appropriate places.</p>`},
+
+{s:"Architecture",q:"Why one app with two tabs instead of two apps?",t:["engineering","architecture","product"],
+ b:`<p><strong>Practical:</strong> Free Edition caps you at three apps. HW1 has one, so spending two on Rainmaker leaves no headroom.</p>
+<p><strong>Design:</strong> it mirrors how real ops tools work — an operate view and a reporting view over the same data, with shared navigation. Splitting them means two deployments, two secret bindings, and a user who has to remember two URLs.</p>`},
+
+{s:"Architecture",q:"Why Flask rather than FastAPI or Streamlit?",t:["engineering","architecture","tradeoff"],
+ b:`<p>Continuity. The Day 1 ticketing app is Flask, the deploy pattern is proven, and the secret binding is identical. With a hard deadline, reusing a path you've already debugged beats a marginally nicer framework.</p>
+<p>Streamlit was the real alternative and would have cost the custom UI — the exposure meter, the bulletin strip, the grounding panel. Those are what make the console look like an instrument rather than a form.</p>`},
+
+{s:"Data model",q:"What are the tables and who writes each one?",t:["engineering","data-model"],
+ fig:D.schema,cap:"Schema map — seeded reference data, live pipeline tables, agent writes, and the CDF-derived analytics layer.",
+ b:`<p>Four groups, distinguished by who writes them:</p>
+<ul>
+<li><strong>Seeded reference:</strong> <code>customers</code>, <code>event_service_map</code>, <code>outreach_templates</code></li>
+<li><strong>Pipeline-written:</strong> <code>weather_events</code>, <code>opportunities</code>, <code>corpus_embeddings</code></li>
+<li><strong>Agent and app writes:</strong> <code>outreach</code>, <code>inbound_replies</code>, <code>bookings</code>, <code>opportunity_status_history</code></li>
+<li><strong>Analytics:</strong> <code>gold_results</code>, <code>cdf_audit</code>, <code>cdf_checkpoint</code></li>
+</ul>`},
+
+{s:"Data model",q:"Why is opportunity_id a hash instead of a serial?",t:["engineering","data-model","gotcha"],
+ tldr:"sha1(event_id + '|' + customer_id) — so re-running the scoring job upserts instead of duplicating.",
+ b:`<p>Match &amp; Score re-runs every time the poller finds new alerts. With a serial key, each run would insert duplicate opportunities for the same storm-customer pair. With a deterministic hash, the same pair always produces the same id, so the insert becomes an upsert and re-running is free.</p>
+<p>The delimiter matters: without the <code>|</code>, <code>id("ab","c")</code> and <code>id("a","bc")</code> would collide. There's a test for exactly that.</p>`},
+
+{s:"Data model",q:"Why is there an est_job_value column when contract_value exists?",t:["engineering","data-model","gotcha"],
+ tldr:"Prospects have contract_value 0. Without a separate column the value factor returns 0 and the entire prospect list sinks to the bottom of the queue.",
+ b:`<p><code>est_job_value</code> is the expected value of the <em>next</em> job: for customers roughly their typical ticket, for prospects the regional median. It's what scoring actually reads.</p>
+<p>This is the kind of bug that would have been invisible in a demo — the queue would look fine, it would just silently never show a prospect.</p>`},
+
+{s:"Data model",q:"Why is event_service_map many-to-many?",t:["engineering","data-model"],
+ b:`<p>A hurricane drives roofing <em>and</em> restoration demand. A winter storm drives plumbing at urgency 0.80 and roofing at 0.55 — burst pipes are more urgent than ice dams, but both are real. A one-to-one mapping would force a choice and lose half the opportunities.</p>
+<p>Secondary benefit: the weather poller derives its API filter from this table, so adding a new hazard is a data change rather than a code change.</p>`},
+
+{s:"Data model",q:"What's the opportunity lifecycle, and where does the agent stop?",t:["engineering","data-model","agent"],
+ fig:D.lifecycle,cap:"Status lifecycle. Green transitions are autonomous; amber require a human.",
+ b:`<p>The agent stops at <strong>booked</strong>. Whether a job sells is decided on site by a person with a ladder, and the system has no way to observe it.</p>
+<p>That boundary is deliberate and worth stating in a pitch. An agent with no stated limits reads as an agent nobody has thought carefully about.</p>`},
+
+{s:"Data model",q:"Why doesn't re-running the scoring job reset an opportunity's status?",t:["engineering","gotcha","data-model"],
+ tldr:"The upsert deliberately omits status. Without that omission, re-polling mid-demo would wipe the funnel on screen.",
+ b:`<p><code>sync_to_lakebase</code> updates <code>exposure_score</code>, <code>priority</code>, <code>distance_km</code>, and <code>est_value</code> — and does <strong>not</strong> touch <code>status</code>.</p>
+<p>Without that exclusion, re-polling the weather would reset every sent and booked opportunity back to <code>identified</code>. A one-line omission that would be very hard to diagnose live.</p>`},
+
+{s:"Scoring",q:"How does exposure scoring work?",t:["engineering","scoring"],
+ fig:D.score,cap:"The four factors, and a worked example showing proximity vetoing a high-value customer.",
+ b:`<pre><code>exposure = severity × proximity × urgency × value    →  0..1</code></pre>
+<p>Constants live at the top of <code>pipeline/scoring.py</code> and are referenced by name in the tests, so tuning is a data change rather than a code change.</p>`},
+
+{s:"Scoring",q:"Why multiplicative instead of additive?",t:["engineering","scoring"],
+ tldr:"So any factor at zero kills the row. An additive score would still rank a distant platinum customer near the top on value alone.",
+ b:`<p>With an additive score, a platinum customer with a $30k job 800 km from the storm would accumulate enough points from value and severity to rank near the top of the queue. They are not an opportunity.</p>
+<p>Multiplication lets <strong>proximity veto value</strong>. There's a test asserting exactly this: <code>test_distant_customer_is_filtered_out_despite_high_value</code>.</p>`},
+
+{s:"Scoring",q:"Why does proximity decay past the footprint edge instead of cutting off?",t:["engineering","scoring"],
+ b:`<p>A house 5 km outside a hail polygon is far more likely to have damage than one 200 km away. A binary in/out test would rank them identically.</p>
+<p>The alert footprint is itself an approximation — NWS polygons are drawn fast, under pressure, from radar. Treating that boundary as a hard fact would be trusting it more than the people who drew it do.</p>`},
+
+{s:"Scoring",q:"Why is scoring pure Python in UDFs rather than Spark column expressions?",t:["engineering","scoring","testing","tradeoff"],
+ tldr:"Logic that only exists inside a Spark expression can't be unit-tested. At this volume the performance cost is unmeasurable.",
+ b:`<p>Spark column expressions would be faster. But testing them means a Spark session, fixture DataFrames, and a <code>collect()</code> just to check that a distant customer scores zero.</p>
+<p>The scoring layer lives in <code>pipeline/scoring.py</code> as plain functions with no Spark import; <code>match_and_score.py</code> wraps them in UDFs. That's what makes 20 scoring tests possible.</p>
+<p><strong>When I'd revisit:</strong> at ~100,000 customers, port the hot path to column expressions and keep the pure functions as the test oracle.</p>`},
+
+{s:"Scoring",q:"How were the scoring constants chosen?",t:["engineering","scoring","limits"],
+ tldr:"Judgment, not fitting — there's no labelled outcome data to fit against yet.",
+ b:`<p>Severity weights track the NWS severity ladder. The 40 km decay distance is roughly the radius of a typical severe-thunderstorm polygon. The $30k value ceiling is near the top of a residential roof replacement, so a $200k commercial job doesn't dominate. The 0.25 cutoff was set so the queue holds a workable number of rows.</p>
+<p>The first real deployment should refit them against actual booked outcomes. Saying that plainly is better than implying rigor that isn't there.</p>`},
+
+{s:"Retrieval & RAG",q:"What makes this real RAG rather than decoration?",t:["engineering","rag","pitch"],
+ tldr:"The test: delete the corpus and does the output get worse? Here yes — 'what wording books hail jobs' is answerable only from this company's campaigns.",
+ fig:D.rag,cap:"Ingestion once per new text; query on every Ask and every draft. Note the refusal branch bypasses the model entirely.",
+ b:`<p>The question the agent needs answered is <em>"what wording actually gets a homeowner to book after hail?"</em> That answer doesn't exist in the model's weights. It exists only in this company's past campaigns and their measured booked rates.</p>
+<p>Compare that to the common capstone pattern — vector search over documents the model could summarise from general knowledge anyway. There, retrieval is decorative.</p>`},
+
+{s:"Retrieval & RAG",q:"What's actually in the corpus?",t:["engineering","rag","data-model"],
+ b:`<p>Two text sources, one index:</p>
+<ul>
+<li><strong>NWS narrative text</strong> — the <code>description</code> and <code>instruction</code> blocks from live alerts. Real meteorological prose about hazard and safety.</li>
+<li><strong>Campaign copy</strong> — seven past campaigns, each 5–7 sentences of real outreach writing with a measured booked rate and send count.</li>
+</ul>
+<p>The booked rate is written <em>into the chunk text</em>, not just the metadata. An analyst asking "what messaging works best" is asking about that number, so it has to be inside what gets embedded.</p>`},
+
+{s:"Retrieval & RAG",q:"Why one unified index instead of separate weather and template indexes?",t:["engineering","rag","architecture"],
+ b:`<p>The headline question is <em>"given this week's storms, who should I prioritise and what should I say?"</em> That needs to retrieve across both corpora in a single search.</p>
+<p>Two indexes would mean two searches and an arbitrary merge rule — how do you compare a 0.71 from one against a 0.68 from the other when they were ranked separately? One index makes the scores directly comparable.</p>
+<p><code>source_type</code> still allows filtering to one corpus, which is how <code>best_template</code> works.</p>`},
+
+{s:"Retrieval & RAG",q:"Why does best_template use semantic search instead of a WHERE clause?",t:["engineering","rag","tradeoff"],
+ tldr:"NWS renames event types. An exact match returns nothing the day that happens; semantic search degrades gracefully.",
+ b:`<p>You could write <code>WHERE event_type = 'Excessive Heat Warning'</code>. It would work today and return nothing the day NWS renames the event — which they did in 2025, replacing it with "Extreme Heat Warning."</p>
+<p>A query for the new name still retrieves the old campaign, because the text is about heat and air conditioning regardless of the header.</p>
+<p>Among semantically close campaigns the final pick weights similarity 60% and past booked rate 40% — closeness alone would ignore which message actually worked.</p>`},
+
+{s:"Retrieval & RAG",q:"What happens when retrieval finds nothing relevant? Can it hallucinate?",k:"hallucinate hallucination make things up made up invent lie wrong answer confabulate accuracy trust guardrail safety",t:["engineering","rag","reliability"],
+ tldr:"ask() returns a refusal without calling the model at all. Handing an LLM empty context and hoping it declines is not a guardrail.",
+ b:`<p>That ordering is the point. Models are helpful by default and will produce a plausible answer from their own weights if you give them an empty context block. The only reliable refusal happens <strong>before generation</strong>.</p>
+<p>The floor is 0.35 cosine similarity, tuned for all-MiniLM-L6-v2 where unrelated text typically lands under 0.25.</p>
+<p>Tool 1 degrades differently: no strong campaign match means it drafts from the weather event alone and records <code>template_id = NULL</code>, so the grounding panel shows nothing rather than something false.</p>`},
+
+{s:"Retrieval & RAG",q:"Why all-MiniLM-L6-v2 and 384 dimensions?",t:["engineering","rag","databricks","gotcha"],
+ b:`<p>Mainly because Homework 2 used it, and <strong>mixing embedding models silently destroys similarity</strong> — vectors from different models aren't comparable, and the failure mode is plausible-looking scores that mean nothing.</p>
+<p>On its merits: small enough to load on serverless in seconds, good enough for short-document retrieval, runs locally so there's no per-query cost or API dependency.</p>
+<p><strong>Deployment gotcha:</strong> serverless Databricks has a read-only HOME, so the model download fails with a permissions error that looks nothing like the real cause. <code>embed_corpus.py</code> sets <code>HF_HOME=/tmp/hf</code> at import.</p>`},
+
+{s:"The agent",q:"What are the three tools?",t:["engineering","agent"],
+ b:`<table><tr><th>Tool</th><th>Does</th><th>Writes</th></tr>
+<tr><td><code>draft_outreach</code></td><td>Retrieves the best past campaign, drafts a personalised message</td><td><code>outreach</code> row, status → drafted</td></tr>
+<tr><td><code>send_and_create_lead</code></td><td>Approves and sends, registers the lead</td><td><code>outreach</code> → sent, status → sent</td></tr>
+<tr><td><code>handle_reply_and_book</code></td><td>Classifies the reply, books the inspection</td><td><code>bookings</code> row, status → booked</td></tr></table>`},
+
+{s:"The agent",q:"Why do the tools need real side-effects?",t:["engineering","agent","pitch"],
+ tldr:"The common failure is three tools that all generate text and hand it back — that's one tool called three times.",
+ b:`<p>Each of these writes rows a human would otherwise have to write. Tool 3 in particular creates a booking — a scheduled appointment with a rep assigned and a value attached.</p>
+<p>That's the difference between an agent and a chatbot.</p>`},
+
+{s:"The agent",q:"Why are replies classified with rules rather than an LLM?",k:"rules regex deterministic why not llm ai everywhere reliability cost latency",t:["engineering","agent","tradeoff"],
+ tldr:"This function decides whether a booking row gets written. It has to be deterministic, testable, offline, and auditable.",
+ b:`<ul>
+<li><strong>Deterministic</strong> — the same reply must always produce the same outcome</li>
+<li><strong>Testable</strong> — 30+ cases run in milliseconds with no mocking</li>
+<li><strong>Offline</strong> — no network round trip that can fail mid-demo</li>
+<li><strong>Auditable</strong> — you can point at the exact pattern that fired</li>
+</ul>
+<p>An LLM call there would be a worse engineering decision dressed up as a more impressive one. The reply vocabulary is genuinely narrow — yes, no, how much, who is this.</p>
+<p><strong>When I'd revisit:</strong> multilingual replies, or customers who write long discursive messages. <code>classify_with_llm</code> is left as a documented fallback seam.</p>`},
+
+{s:"The agent",q:"Why is opt-out a hard stop before any scoring?",t:["engineering","agent","ethics","reliability"],
+ b:`<p>"Sounds great, but stop texting me" reads enthusiastic to a naive scorer — "sounds great" is a strong positive pattern. Texting that person again is a TCPA compliance problem, not a missed sale.</p>
+<p><code>HARD_OPT_OUT</code> is checked before the scoring pass and returns <code>not_now</code> with confidence 1.0 regardless of anything else in the message. Five tests cover it, two deliberately written to look positive.</p>`},
+
+{s:"The agent",q:"When does the agent book automatically, and when does it defer to a human?",t:["engineering","agent"],
+ tldr:"Only a confident 'interested' books itself — intent interested and confidence ≥ 0.45. Mixed messages go to a person.",
+ b:`<p>Confidence is the winning category's share of total signal, so a message that hits one category cleanly scores high and a mixed message scores low. Mixed messages are exactly when a human should look.</p>
+<p>One deliberate exception: <strong>"Yes please, but how much will it cost?" books.</strong> It's interested <em>and</em> a question, and routing it to a human loses the moment — the rep answers pricing on the call.</p>`},
+
+{s:"The agent",q:"What can the agent not do?",k:"limits guardrails autonomy human in the loop oversight control safety boundaries",t:["engineering","agent","pitch"],
+ b:`<ul>
+<li>Mark a job <strong>won</strong>. That's decided on site after a quote.</li>
+<li>Send without approval. Tool 2 runs on an analyst click.</li>
+<li>Book on an ambiguous reply. Below the confidence floor it flags for a human.</li>
+<li>Invent prices, dates, or damage claims — explicitly forbidden in the prompt.</li>
+</ul>
+<p>Naming the boundaries is part of the pitch.</p>`},
+
+{s:"Change data capture",q:"How is Change Data Feed actually used, rather than just enabled?",t:["engineering","cdc","databricks"],
+ tldr:"The Results tab renders numbers computed from the feed, and labels its own source so 'from the change feed' and 'queried just now' aren't blurred.",
+ b:`<ol>
+<li><code>gold_rollup.py</code> reads current opportunity state from Lakebase.</li>
+<li>MERGEs it into the Delta table — the merge generates change records.</li>
+<li>Reads <code>readChangeFeed</code> from a stored checkpoint version.</li>
+<li>Rolls up funnel counts and revenue at two grains: overall and by storm type.</li>
+<li>Pushes the rollup <em>and</em> the raw change rows back to Lakebase.</li>
+</ol>`},
+
+{s:"Change data capture",q:"Why MERGE instead of overwrite?",t:["engineering","cdc","gotcha"],
+ b:`<p>Overwrite rewrites every row, so the change feed reports the entire table as changed. The three transitions you care about drown in 200 rows of noise and the audit trail becomes useless.</p>
+<p><code>MERGE ... WHEN MATCHED AND t.status &lt;&gt; s.status</code> produces change records only for rows that genuinely moved.</p>`},
+
+{s:"Change data capture",q:"Why is there a Postgres trigger AND Delta CDF? Isn't that duplicated?",t:["engineering","cdc","architecture"],
+ b:`<p>Different jobs, and the app is honest about which it's showing.</p>
+<p>The trigger is the <strong>operational log</strong> — it fires the instant a status changes, so the trail is visible immediately without waiting for a batch job. Delta CDF is the <strong>analytics engine</strong>, and it's what the requirement asks for.</p>
+<p><code>/api/cdf-trail</code> prefers the CDF-derived rows and falls back to the trigger history, reporting <code>source</code> either way. During a first demo the rollup may not have run, and a blank tab is worse than a labelled fallback.</p>`},
+
+{s:"Change data capture",q:"Why 'estimated pipeline' and not 'revenue'?",k:"revenue ROI money return payback value close rate metrics honest accounting overstate inflate",t:["business","engineering","pitch","ethics"],
+ tldr:"The first booking is an inspection, not a sold job. Calling booked-but-unsold dollars 'revenue' is how a demo loses credibility with anyone who has run a services business.",
+ b:`<p>The Results tab shows both — pipeline created (est.) and jobs won (actual) — and the gap between them is the close rate, which is a real number a buyer would want to see.</p>
+<p><code>won_value</code> on <code>bookings</code> is only populated when status reaches <code>won</code>.</p>`},
+
+{s:"Real vs simulated",q:"What is real, what is synthetic, and what is simulated?",t:["credibility","pitch"],
+ fig:D.credibility,cap:"The credibility map. Volunteering this is stronger than having someone discover it.",
+ b:`<p><strong>Real:</strong> NWS alerts and narrative text, the Spark pipeline, the vector index and every retrieval, all three agent tools and their writes, the Delta change feed and rollup.</p>
+<p><strong>Synthetic:</strong> the CRM — 61 customers across six tenants — and the seven campaign templates.</p>
+<p><strong>Simulated:</strong> inbound customer replies only.</p>`},
+
+{s:"Real vs simulated",q:"The CRM is fake — what does the demo actually prove?",k:"fake synthetic made up real data credibility proof legitimate mock dummy placeholder",t:["credibility","pitch"],
+ tldr:"Everything except the identity of the people. The matching, scoring, retrieval, drafting, classification, booking and capture all run on real weather.",
+ b:`<p>Real customer data can't be used, and synthetic CRM is standard for a capstone. What matters is that the synthetic layer is <em>only</em> the identities.</p>
+<p>The placement isn't arbitrary either: each tenant sits where its hazard actually occurs — hail alley for roofing, upper midwest for plumbing, sunbelt for HVAC. That's what makes the demo never empty, because some NWS alert is always live over someone's footprint.</p>`},
+
+{s:"Real vs simulated",q:"Why simulate replies at all, and why seeded rather than random?",t:["engineering","testing","credibility"],
+ b:`<p><strong>Why simulate:</strong> a 90-second demo can't wait for real humans to text back. The alternative — pre-seeding a static set of replies — would be less honest, because it would hide that nothing live is happening.</p>
+<p><strong>Why seeded:</strong> so take three of the demo behaves exactly like take one. The intent for a given opportunity is derived from a hash of its id.</p>
+<p>The mix is ~60% interested / 25% question / 15% not now. A test asserts the distribution holds across 1,000 draws — a demo where nobody says yes isn't a demo, and one where everyone says yes isn't credible.</p>`},
+
+{s:"Testing",q:"What's the test philosophy?",t:["engineering","testing"],
+ tldr:"91 tests, none touching the network. Test the decisions that change outcomes, not the plumbing.",
+ b:`<ul>
+<li><code>test_scoring.py</code> — proximity vetoes value, priority bands are total, opportunity ids are stable</li>
+<li><code>test_classify.py</code> — the auto-book decision, mixed signals, opt-out</li>
+<li><code>test_weather_client.py</code> — malformed alerts skipped not raised, polygon geometry, capped radius</li>
+<li><code>test_simulate.py</code> — determinism, distribution, simulator/classifier agreement</li>
+</ul>`},
+
+{s:"Testing",q:"Why does no test touch the network?",t:["engineering","testing","tradeoff"],
+ b:`<p>A suite that needs the internet is a suite that fails while you're recording a demo, or while a grader runs it.</p>
+<p>Every NWS test runs against fixture GeoJSON shaped like a real response, and the fetch layer is tested through a fake session object.</p>
+<p><strong>The tradeoff:</strong> a real API contract change wouldn't be caught — which is why <code>normalize_alert</code> is written to skip malformed features rather than raise.</p>`},
+
+{s:"Testing",q:"What bug did the tests actually catch?",k:"bug caught defect found regression real world value of tests proof",t:["engineering","testing","gotcha"],
+ tldr:"'Yes please, but how much will it cost?' classified as a question and got routed to a human instead of booking.",
+ b:`<p>That's a customer who explicitly said yes, lost to a scoring quirk — the pricing question scored 4.5 against the affirmative's 3.0. In production it would look like nothing at all; the booking simply wouldn't happen.</p>
+<p>The fix was to make an explicit affirmative carry a bonus — as a <em>bonus</em> rather than a hard override, so genuinely mixed replies still fall below the auto-book floor. The alternative, loosening the assertion, would have shipped the bug.</p>
+<p>Two others: the <code>sys.path</code> inserts were relative to the working directory and would have worked locally then failed on deploy; and <code>simulate.py</code> imported psycopg2 at module load, so pure reply logic couldn't be tested without a database driver.</p>`},
+
+{s:"Testing",q:"What's the strongest single test?",t:["engineering","testing"],
+ b:`<p><code>test_simulated_replies_classify_to_their_seeded_intent</code>. It runs 300 simulated replies through the real classifier and asserts the seeded intent matches.</p>
+<p>Without it, the simulator could seed a reply as "interested" while the classifier reads it as a question — and the demo's booked count would quietly be a lie.</p>
+<p>It's the only test that checks two components <em>agree</em> rather than checking one component works.</p>`},
+
+{s:"Limits & roadmap",q:"What are the known limits?",t:["engineering","limits"],
+ b:`<ul>
+<li><strong>Bounding-circle geometry.</strong> Alert polygons reduce to a centroid and radius. Point-in-polygon would be more precise.</li>
+<li><strong>Zone-only alerts.</strong> Some NWS alerts carry no polygon; they score at neutral proximity rather than being dropped.</li>
+<li><strong>UDFs over column expressions.</strong> Slower, deliberately, for testability.</li>
+<li><strong>Won revenue is analyst-marked.</strong> No integration with the field.</li>
+<li><strong>Constants are judgment-set</strong>, not fitted to outcome data.</li>
+<li><strong>No drive-time or crew-capacity modelling.</strong> Distance is great-circle.</li>
+<li><strong>Possible duplication with Wireless Emergency Alerts.</strong> During an active Extreme event a phone may already be blaring a WEA. Our urgent-tier notice is kept short partly for that reason, but a production version should probably hold the notice until the imminent-danger window has passed.</li>
+</ul>`},
+
+{s:"Limits & roadmap",q:"What breaks at 10,000 customers? Does this scale?",k:"scale scaling scalability performance throughput load bottleneck enterprise growth volume",t:["engineering","limits","pitch"],
+ tldr:"Four things, none of them rewrites.",
+ b:`<ul>
+<li><strong>The cross join.</strong> Fine at 61 customers, not at 10,000 × 200 alerts. Fix: spatial partitioning — bucket customers by geohash prefix and only join alerts whose footprint touches the bucket.</li>
+<li><strong>The UDFs.</strong> Port the hot path to Spark column expressions, keep the pure functions as the test oracle.</li>
+<li><strong>The pandas hop.</strong> <code>pd.read_sql</code> into <code>createDataFrame</code> doesn't survive that volume. Fix: Delta mirrors of the CRM, refreshed on a schedule.</li>
+<li><strong>HNSW recall.</strong> Fine at thousands of chunks; needs tuning at millions.</li>
+</ul>
+<p>None of these are rewrites. That's a reasonable answer to give an investor.</p>`},
+
+{s:"Limits & roadmap",q:"Couldn't a competitor rebuild this in a weekend?",k:"moat defensibility competition competitor barrier to entry IP proprietary differentiation copy clone",t:["business","pitch"],
+ tldr:"The mechanism, roughly yes. The campaign corpus with real booked rates isn't a weekend — and it compounds.",
+ b:`<p>The pipeline is a weather API, a join, a score, and an LLM call. What isn't a weekend is the corpus of campaigns with measured outcomes. That's the asset that makes retrieval worth doing, and every campaign sent through the system adds a labelled outcome.</p>
+<p>A competitor starting today has an empty corpus and no way to know which message works.</p>
+<p>The honest version: <strong>the moat is data accumulation and the customer relationship, not the code.</strong> True of most software, and worth saying plainly rather than claiming technical defensibility that isn't there.</p>`},
+
+{s:"Limits & roadmap",q:"What happens when the NWS API goes down?",k:"downtime outage reliability uptime resilience failure fallback single point of failure dependency risk",t:["engineering","reliability","pitch"],
+ b:`<p>Nothing catastrophic, because the alerts already polled are persisted in <code>weather_events</code>. The queue, the drafts, the agent and the console all keep working on what's already there — only new storms stop arriving.</p>
+<p><code>normalize_alert</code> skips malformed features rather than raising, so a partial or degraded response doesn't take down the poller. And the poller says plainly when it finds nothing, rather than looking broken.</p>
+<p>What's genuinely lost is timeliness, which is the product's whole value — so a production version would want a second weather source. Worth naming rather than glossing.</p>`},
+
+{s:"Limits & roadmap",q:"What would you build next?",k:"roadmap future vision next steps v2 backlog what else",t:["business","roadmap","pitch"],
+ b:`<p>Named as roadmap, deliberately not built:</p>
+<ul>
+<li><strong>Appointment confirmations and reminders</strong> — the highest-value next tool, because no-shows are where booked inspections leak.</li>
+<li><strong>Post-job review requests</strong> — timed off the completed status.</li>
+<li><strong>Seasonal re-engagement</strong> — customers no storm has touched still need maintenance.</li>
+<li><strong>Email as a second channel</strong> — SMS is right for urgency, wrong for detail.</li>
+<li><strong>Prospect enrichment</strong> from permit and property records — roof age is the single best predictor of hail claim success.</li>
+</ul>`},
+
+{s:"Demo",q:"What's the 90-second demo run?",t:["pitch","demo"],
+ b:`<ol>
+<li><strong>Bulletin strip.</strong> Real NWS alerts, live, in teletype. "This is what's happening right now."</li>
+<li><strong>The queue.</strong> Ranked by exposure. The meter shows severity, distance, service match and value in one glance.</li>
+<li><strong>Draft.</strong> The grounding panel shows which past campaign it retrieved and the similarity score.</li>
+<li><strong>Send.</strong> The loop runs: sent → reply → classified → booked. About two seconds.</li>
+<li><strong>Results.</strong> Funnel fills, pipeline ticks up. Open the change feed — "every one of those is a captured transition."</li>
+<li><strong>Ask.</strong> "What messaging has worked best for hail?" Grounded answer with sources and similarity scores.</li>
+</ol>
+<p><em>"From one hailstorm — 80 opportunities, 30 reached, 7 inspections booked, $42k of estimated pipeline. From a storm that used to be a scramble."</em></p>`},
+
+{s:"Demo",q:"What to do if the demo breaks",t:["demo","reliability"],
+ b:`<ul>
+<li><strong>No active alerts.</strong> Possible on a calm day. Widen <code>event_types</code> to include Heat Advisory — almost always live somewhere in the sunbelt footprint.</li>
+<li><strong>Model endpoint slow.</strong> Draft a message before recording; it persists in <code>outreach</code> and renders from the database.</li>
+<li><strong>Empty Results tab.</strong> Run <code>gold_rollup.run()</code> first. The tab falls back to a live query and labels itself, but the CDF story is stronger.</li>
+<li><strong>Anything else.</strong> <code>/healthz</code> reports database connectivity directly.</li>
+</ul>`},
+];
+
+// ─── Search ────────────────────────────────────────────────────────
+const AUDIENCES = {
+  all:null,
+  investor:["business","pitch","credibility","roadmap","ethics","limits"],
+  client:["business","pitch","ethics","credibility","demo","reliability","limits"],
+  engineer:["engineering","architecture","data-model","scoring","rag","agent","cdc","testing","tradeoff","gotcha","databricks"],
+};
+let audience="all", query="";
+
+const strip = h => h.replace(/<[^>]+>/g," ").replace(/&[a-z]+;/g," ");
+CARDS.forEach(c => c._hay = (c.q+" "+c.s+" "+(c.tldr||"")+" "+strip(c.b)+" "+c.t.join(" ")+" "+(c.k||"")).toLowerCase());
+
+function esc(s){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}
+function hl(text, terms){
+  if(!terms.length) return text;
+  return text.replace(new RegExp("("+terms.map(esc).join("|")+")","gi"), "<mark>$1</mark>");
+}
+
+function render(){
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(t=>t.length>1);
+  const allow = AUDIENCES[audience];
+  const hits = CARDS.filter(c => {
+    if(allow && !c.t.some(t=>allow.includes(t))) return false;
+    return terms.every(t => c._hay.includes(t));
+  });
+
+  document.getElementById("count").textContent =
+    hits.length + " of " + CARDS.length + (terms.length||allow ? " matching" : " entries");
+
+  const out = document.getElementById("out");
+  if(!hits.length){
+    out.innerHTML = `<p class="none">Nothing matches <b>${query}</b> for this audience.<br>
+      Try fewer words, or switch the filter to All.</p>`;
+    return;
+  }
+
+  let html="", section=null;
+  const open = terms.length > 0;
+  for(const c of hits){
+    if(c.s !== section){ section = c.s; html += `<div class="sec">${section}</div>`; }
+    html += `<details class="card"${open?" open":""}>
+      <summary>${hl(c.q,terms)}</summary>
+      <div class="body">
+        ${c.tldr?`<div class="tldr"><b>Short answer</b>${hl(c.tldr,terms)}</div>`:""}
+        ${c.fig?`<figure>${c.fig}${c.cap?`<figcaption>${c.cap}</figcaption>`:""}</figure>`:""}
+        ${hl(c.b,terms)}
+        <div class="tags">${c.t.map(t=>`<span class="tag">${t}</span>`).join("")}</div>
+      </div></details>`;
+  }
+  out.innerHTML = html;
+}
+
+document.getElementById("filters").innerHTML =
+  Object.keys(AUDIENCES).map(k =>
+    `<button class="f" data-a="${k}" aria-pressed="${k==='all'}">${
+      k==='all'?'All':k==='investor'?'For investors':k==='client'?'For clients':'For engineers'}</button>`
+  ).join("");
+
+document.getElementById("filters").addEventListener("click", e => {
+  const b = e.target.closest(".f"); if(!b) return;
+  audience = b.dataset.a;
+  document.querySelectorAll(".f").forEach(x => x.ariaPressed = (x===b));
+  render();
+});
+
+let deb;
+document.getElementById("q").addEventListener("input", e => {
+  clearTimeout(deb);
+  deb = setTimeout(()=>{ query = e.target.value; render(); }, 110);
+});
+
+document.addEventListener("keydown", e => {
+  if(e.key === "/" && document.activeElement.id !== "q"){ e.preventDefault(); document.getElementById("q").focus(); }
+  if(e.key === "Escape"){ const q=document.getElementById("q"); q.value=""; query=""; render(); q.blur(); }
+});
+
+render();
+</script>
+</body>
+</html>
