@@ -152,10 +152,53 @@ def _infer_state(area_desc: str) -> str | None:
 # ---------------------------------------------------------------------
 # Fetch
 # ---------------------------------------------------------------------
+def _raise_for_nws_error(resp: Any) -> None:
+    """
+    On a 4xx/5xx, raise RuntimeError carrying NWS's problem detail.
+
+    NWS answers a bad request with RFC-7807 problem+json whose `parameterErrors`
+    array names exactly which query parameter it rejected and why (e.g.
+    'Query parameter "limit" is not recognized'). requests' raise_for_status()
+    throws that body away and reports only the status code -- turning a one-line
+    fix into an hour of guessing. Parse it out instead.
+
+    Falls back to `detail`, then `title`, then the raw response text when the
+    body is not the expected shape (or is not JSON at all).
+    """
+    if resp.status_code < 400:
+        return
+
+    detail: str | None = None
+    try:
+        body = resp.json()
+    except Exception:
+        body = None
+
+    if isinstance(body, dict):
+        param_errors = body.get("parameterErrors")
+        if isinstance(param_errors, list) and param_errors:
+            parts = []
+            for pe in param_errors:
+                if not isinstance(pe, dict):
+                    continue
+                param = pe.get("parameter")
+                message = pe.get("message")
+                parts.append(f"{param}: {message}" if param else str(message))
+            detail = "; ".join(p for p in parts if p) or None
+        if not detail:
+            detail = body.get("detail") or body.get("title")
+
+    if not detail:
+        detail = (getattr(resp, "text", "") or "").strip() or None
+
+    raise RuntimeError(
+        f"NWS request failed (HTTP {resp.status_code}): {detail or 'no detail provided'}"
+    )
+
+
 def fetch_active_alerts(
     states: list[str] | None = None,
     event_types: list[str] | None = None,
-    limit: int = 500,
     session: requests.Session | None = None,
 ) -> list[dict[str, Any]]:
     """
@@ -167,14 +210,18 @@ def fetch_active_alerts(
     when any value is stale or unrecognised -- one bad name fails the whole
     poll. Fetching by state and matching event_type in Python is resilient to
     that: an event name that no longer exists simply matches nothing.
+
+    No `limit` param: /alerts/active does not accept one (it 400s with
+    'Query parameter "limit" is not recognized'). Active alerts are naturally
+    bounded -- the whole US is a few hundred at a time.
     """
-    params: dict[str, Any] = {"status": "actual", "message_type": "alert", "limit": limit}
+    params: dict[str, Any] = {"status": "actual", "message_type": "alert"}
     if states:
         params["area"] = ",".join(states)
 
     http = session or requests
     resp = http.get(NWS_ALERTS_URL, params=params, headers=_headers(), timeout=TIMEOUT)
-    resp.raise_for_status()
+    _raise_for_nws_error(resp)
 
     features = (resp.json() or {}).get("features") or []
     rows = [normalize_alert(f) for f in features]

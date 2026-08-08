@@ -145,11 +145,15 @@ def test_degenerate_polygon_gets_minimum_radius():
 # Fetch layer -- fake transport, no network
 # ---------------------------------------------------------------------
 class _FakeResponse:
-    def __init__(self, payload, status=200):
+    def __init__(self, payload, status=200, text="", json_raises=False):
         self._payload = payload
         self.status_code = status
+        self.text = text
+        self._json_raises = json_raises
 
     def json(self):
+        if self._json_raises:
+            raise ValueError("No JSON object could be decoded")
         return self._payload
 
     def raise_for_status(self):
@@ -158,14 +162,16 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, payload, status=200):
+    def __init__(self, payload, status=200, text="", json_raises=False):
         self._payload = payload
         self._status = status
+        self._text = text
+        self._json_raises = json_raises
         self.last_kwargs = None
 
     def get(self, url, **kwargs):
         self.last_kwargs = kwargs
-        return _FakeResponse(self._payload, self._status)
+        return _FakeResponse(self._payload, self._status, self._text, self._json_raises)
 
 
 def test_fetch_filters_out_malformed_features():
@@ -241,6 +247,55 @@ def test_no_event_types_returns_all_normalized_alerts():
     }
     rows = wc.fetch_active_alerts(session=_FakeSession(payload))
     assert len(rows) == 2
+
+
+def test_fetch_never_sends_limit_param():
+    """/alerts/active does not accept `limit` -- it 400s with
+    'Query parameter "limit" is not recognized'. It must never be sent."""
+    session = _FakeSession({"features": []})
+    wc.fetch_active_alerts(states=["TX"], session=session)
+    assert "limit" not in session.last_kwargs["params"]
+
+
+def test_400_with_parameter_errors_names_the_rejected_parameter():
+    """A rejected-parameter 400 must surface WHICH parameter NWS rejected,
+    not just the status code -- that detail is the whole fix."""
+    problem = {
+        "type": "https://api.weather.gov/problems/InvalidParameter",
+        "title": "Invalid Parameter",
+        "status": 400,
+        "detail": "Bad request",
+        "parameterErrors": [
+            {"parameter": "limit", "message": 'Query parameter "limit" is not recognized'},
+        ],
+    }
+    session = _FakeSession(problem, status=400)
+    with pytest.raises(RuntimeError) as exc:
+        wc.fetch_active_alerts(states=["TX"], session=session)
+    msg = str(exc.value)
+    assert "limit" in msg
+    assert "not recognized" in msg
+    assert "400" in msg
+
+
+def test_non_json_error_body_still_raises_cleanly():
+    """Not every error body is problem+json (proxy 502s, HTML pages). The
+    client must still raise a RuntimeError, falling back to the raw text."""
+    session = _FakeSession(
+        None, status=502, text="502 Bad Gateway", json_raises=True
+    )
+    with pytest.raises(RuntimeError) as exc:
+        wc.fetch_active_alerts(states=["TX"], session=session)
+    assert "502" in str(exc.value)
+
+
+def test_error_falls_back_to_detail_when_no_parameter_errors():
+    """When the problem body has no parameterErrors, use `detail`/`title`."""
+    problem = {"title": "Forbidden", "status": 403, "detail": "User-Agent required"}
+    session = _FakeSession(problem, status=403)
+    with pytest.raises(RuntimeError) as exc:
+        wc.fetch_active_alerts(session=session)
+    assert "User-Agent required" in str(exc.value)
 
 
 def test_empty_response_returns_empty_list_not_none():
