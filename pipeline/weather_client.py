@@ -162,14 +162,15 @@ def fetch_active_alerts(
     Fetch active alerts, optionally filtered to the states we cover and the
     event types that actually create service demand.
 
-    Filtering server-side keeps us from pulling thousands of Special Weather
-    Statements we would only discard.
+    We filter by state server-side but by event type CLIENT-SIDE. The NWS
+    `event` query param validates against a fixed enum and returns HTTP 400
+    when any value is stale or unrecognised -- one bad name fails the whole
+    poll. Fetching by state and matching event_type in Python is resilient to
+    that: an event name that no longer exists simply matches nothing.
     """
     params: dict[str, Any] = {"status": "actual", "message_type": "alert", "limit": limit}
     if states:
         params["area"] = ",".join(states)
-    if event_types:
-        params["event"] = event_types
 
     http = session or requests
     resp = http.get(NWS_ALERTS_URL, params=params, headers=_headers(), timeout=TIMEOUT)
@@ -177,4 +178,10 @@ def fetch_active_alerts(
 
     features = (resp.json() or {}).get("features") or []
     rows = [normalize_alert(f) for f in features]
-    return [r for r in rows if r is not None]
+    rows = [r for r in rows if r is not None]
+
+    if event_types:
+        wanted = {e.strip().lower() for e in event_types}
+        rows = [r for r in rows if (r["event_type"] or "").strip().lower() in wanted]
+
+    return rows

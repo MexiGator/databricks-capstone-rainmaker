@@ -188,6 +188,61 @@ def test_fetch_passes_state_filter():
     assert session.last_kwargs["params"]["area"] == "TX,OK"
 
 
+def test_fetch_never_sends_event_param():
+    """NWS validates `event` against a fixed enum and returns HTTP 400 when any
+    value is stale. We must filter event types client-side, so `event` must
+    never appear in the outgoing query params -- even when event_types is set."""
+    session = _FakeSession({"features": []})
+    wc.fetch_active_alerts(
+        states=["TX"],
+        event_types=["Severe Thunderstorm Warning", "Flood Watch"],
+        session=session,
+    )
+    assert "event" not in session.last_kwargs["params"]
+
+
+def test_client_side_event_filter_keeps_only_matching_types():
+    payload = {
+        "features": [
+            _feature(properties={"id": "a", "event": "Severe Thunderstorm Warning"}),
+            _feature(properties={"id": "b", "event": "Flood Watch"}),
+            _feature(properties={"id": "c", "event": "Special Weather Statement"}),
+        ]
+    }
+    rows = wc.fetch_active_alerts(
+        event_types=["Severe Thunderstorm Warning", "Flood Watch"],
+        session=_FakeSession(payload),
+    )
+    kept = {r["event_type"] for r in rows}
+    assert kept == {"Severe Thunderstorm Warning", "Flood Watch"}
+
+
+def test_client_side_event_filter_is_case_insensitive():
+    payload = {
+        "features": [
+            _feature(properties={"id": "a", "event": "Severe Thunderstorm Warning"}),
+            _feature(properties={"id": "b", "event": "Flood Watch"}),
+        ]
+    }
+    rows = wc.fetch_active_alerts(
+        event_types=["severe thunderstorm warning", "FLOOD WATCH"],
+        session=_FakeSession(payload),
+    )
+    assert len(rows) == 2
+
+
+def test_no_event_types_returns_all_normalized_alerts():
+    """event_types=None means 'no event filter' -- every valid alert survives."""
+    payload = {
+        "features": [
+            _feature(properties={"id": "a", "event": "Heat Advisory"}),
+            _feature(properties={"id": "b", "event": "Special Weather Statement"}),
+        ]
+    }
+    rows = wc.fetch_active_alerts(session=_FakeSession(payload))
+    assert len(rows) == 2
+
+
 def test_empty_response_returns_empty_list_not_none():
     rows = wc.fetch_active_alerts(session=_FakeSession({"features": []}))
     assert rows == []
