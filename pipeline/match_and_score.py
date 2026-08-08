@@ -55,10 +55,18 @@ DELTA_TABLE = "workspace.default.rainmaker_opportunities"
 # Load: Lakebase -> pandas -> Spark
 # ---------------------------------------------------------------------
 def _read_sql(query: str):
+    import warnings
+
     import pandas as pd
 
     with _db().connect() as conn:
-        return pd.read_sql(query, conn)
+        # pandas warns that a raw psycopg2 connection isn't a SQLAlchemy
+        # connectable. It reads fine anyway -- pulling in SQLAlchemy purely to
+        # silence a warning isn't worth the extra dependency. Suppress just this
+        # one message so real warnings still surface.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*SQLAlchemy connectable.*")
+            return pd.read_sql(query, conn)
 
 
 # Explicit schemas, not inference.
@@ -323,7 +331,10 @@ def run() -> int:
     spark = SparkSession.builder.getOrCreate()
 
     customers_df, events_df, mapping_df = load_frames(spark)
-    opportunities = score(customers_df, events_df, mapping_df).cache()
+    # No .cache(): serverless rejects PERSIST with [NOT_SUPPORTED_WITH_SERVERLESS].
+    # Each action below re-evaluates the plan, which at this data volume (a few
+    # hundred rows) costs milliseconds -- not worth persisting even if we could.
+    opportunities = score(customers_df, events_df, mapping_df)
 
     n = opportunities.count()
     print(f"Scored {n} opportunities above the {scoring.QUEUE_CUTOFF} cutoff.")
