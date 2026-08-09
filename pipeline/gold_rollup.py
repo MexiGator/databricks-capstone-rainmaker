@@ -36,7 +36,21 @@ from pyspark.sql import functions as F
 
 import lakebase
 
-DELTA_TABLE = "workspace.default.rainmaker_opportunities"
+# A SEPARATE table from the one match_and_score writes, deliberately.
+#
+# They were the same table, and it broke twice over:
+#   1. Different column sets. match_and_score writes distance_km and
+#      assigned_rep; this job writes status, updated_at and event_type. MERGE
+#      ... UPDATE SET * cannot resolve a column the source does not have:
+#      [DELTA_MERGE_UNRESOLVED_EXPRESSION] Cannot resolve distance_km.
+#   2. match_and_score writes with mode("overwrite"). Even with matching
+#      schemas, re-running the scoring job would reset every status to
+#      'identified' and wipe the funnel.
+#
+# They are two different facts. rainmaker_opportunities is what the pipeline
+# COMPUTED; this is what subsequently HAPPENED to those opportunities, and it
+# is the one carrying Change Data Feed.
+DELTA_TABLE = "workspace.default.rainmaker_opportunity_state"
 
 # Which statuses count at each funnel stage. A booked opportunity has also
 # been sent and responded to -- the funnel is cumulative, not exclusive.
@@ -50,7 +64,10 @@ WON_STATES = ("won", "completed")
 # 1-2. Sync Lakebase state into Delta so the change feed sees it
 # ---------------------------------------------------------------------
 def sync_state_to_delta(spark: SparkSession) -> None:
-    with lakebase.connect() as conn:
+    import warnings
+
+    with lakebase.connect() as conn, warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*SQLAlchemy connectable.*")
         current = pd.read_sql(
             """
             SELECT o.opportunity_id, o.weather_event_id, o.customer_id, o.tenant,

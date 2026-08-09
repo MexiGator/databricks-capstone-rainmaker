@@ -174,7 +174,12 @@ def stage_embed() -> bool:
         return True
     except Exception as exc:
         msg = str(exc)
-        if "Permission" in msg or "Read-only" in msg or "cache" in msg.lower():
+        if "No module named 'sentence_transformers'" in msg:
+            _fail("sentence-transformers is not installed on this cluster",
+                  "run in a cell ABOVE this one, then re-run:\n"
+                  "          %pip install sentence-transformers\n"
+                  "          dbutils.library.restartPython()")
+        elif "Permission" in msg or "Read-only" in msg or "cache" in msg.lower():
             _fail(msg, "serverless HOME is read-only — HF_HOME must point at /tmp/hf "
                        "(embed_corpus sets this at import; make sure it is imported first)")
         else:
@@ -248,7 +253,13 @@ def stage_rollup() -> bool:
             f"version {result['version']}")
         return True
     except Exception as exc:
-        _fail(str(exc), "needs opportunities in Lakebase — run stage 4 first")
+        msg = str(exc)
+        if "DELTA_MERGE_UNRESOLVED_EXPRESSION" in msg:
+            _fail(msg, "the CDF state table has a stale schema — drop it and re-run:\n"
+                       "          spark.sql('DROP TABLE IF EXISTS "
+                       "workspace.default.rainmaker_opportunity_state')")
+        else:
+            _fail(msg, "needs opportunities in Lakebase — run stage 4 first")
         return False
 
 
