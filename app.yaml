@@ -1,0 +1,15 @@
+# This file lives at the REPO ROOT, not in app/, on purpose.
+#
+# Databricks Apps only uploads the single folder the app is pointed at. When
+# app.yaml lived in app/, only app/ was deployed -- db/, agent/ and pipeline/
+# never shipped, and the app crashed with `ModuleNotFoundError: No module
+# named 'lakebase'`. Pointing the app at the repo root uploads the whole
+# project, so app.py can import its sibling packages. Hence the entrypoint is
+# app/app.py rather than app.py.
+command: ["python", "app/app.py"]
+
+env:
+  # Resource key in the Databricks App MUST be exactly `lakebase-url`,
+  # or the app boots with `RuntimeError: LAKEBASE_URL is not set`.
+  - name: LAKEBASE_URL
+    valueFrom: lakebase-url

@@ -1,7 +1,0 @@
-command: ["python", "app.py"]
-
-env:
-  # Resource key in the Databricks App MUST be exactly `lakebase-url`,
-  # or the app boots with `RuntimeError: LAKEBASE_URL is not set`.
-  - name: LAKEBASE_URL
-    valueFrom: lakebase-url
