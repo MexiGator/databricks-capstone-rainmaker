@@ -1,0 +1,6 @@
+# relationship_v0 — additive deps only. The graded app already has Flask,
+# psycopg2-binary, and sentence-transformers; nothing new is strictly required.
+# Pure logic + tests need only the stdlib + pytest.
+pytest>=7.0        # tests/eval only
+# (runtime) Flask, psycopg2-binary, sentence-transformers, requests
+#           are already in the Rainmaker app's requirements — do not duplicate.

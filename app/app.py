@@ -355,5 +355,20 @@ def cdf_trail():
         return _fail(exc)
 
 
+# =====================================================================
+# v0.1 RELATIONSHIP LAYER -- dark by default (the ONLY edit to this file)
+# =====================================================================
+# Additive and reversible: the relationship blueprint registers ONLY when
+# ENABLE_RELATIONSHIP_V0=1. With the flag unset (the graded default), nothing
+# below runs and this app is byte-for-byte the submitted build. Rollback is
+# unsetting the flag. See relationship_v0/README_RELATIONSHIP.md.
+import os
+
+if os.getenv("ENABLE_RELATIONSHIP_V0") == "1":
+    from relationship_v0.routes import bp as relationship_bp
+
+    app.register_blueprint(relationship_bp)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=False)

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rainmaker · Proactive Care</title>
+<style>
+  :root {
+    --bg:#0f1720; --panel:#151f2b; --panel2:#1b2634; --line:#243244;
+    --ink:#e7eef6; --muted:#8ea3b8; --accent:#38bdf8; --accent2:#22d3ee;
+    --hot:#fb7185; --warm:#fbbf24; --cool:#60a5fa; --cold:#94a3b8;
+    --send:#34d399; --hold:#f87171;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:28px 20px 64px; }
+  .top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .tag { font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:#04121c; background:linear-gradient(90deg,var(--accent),var(--accent2));
+    padding:4px 10px; border-radius:999px; font-weight:700; }
+  h1 { font-size:22px; margin:14px 0 4px; }
+  .sub { color:var(--muted); margin:0 0 22px; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  input[type=text] { background:var(--panel2); border:1px solid var(--line);
+    color:var(--ink); padding:9px 12px; border-radius:8px; min-width:220px; }
+  button { cursor:pointer; border:0; border-radius:8px; padding:9px 14px;
+    font-weight:600; color:#04121c; background:var(--accent); }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  .summary { margin:18px 2px 10px; color:var(--muted); font-size:14px; }
+  .summary b { color:var(--ink); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; margin:10px 0; }
+  .card.hold { opacity:.72; }
+  .row1 { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .name { font-weight:700; font-size:16px; }
+  .meta { color:var(--muted); font-size:13px; }
+  .badge { display:inline-flex; align-items:center; gap:6px; font-size:12px;
+    font-weight:700; padding:3px 10px; border-radius:999px; text-transform:uppercase;
+    letter-spacing:.04em; color:#04121c; }
+  .badge .score { font-variant-numeric:tabular-nums; }
+  .badge.hot { background:var(--hot); } .badge.warm { background:var(--warm); }
+  .badge.cool { background:var(--cool); } .badge.cold { background:var(--cold); }
+  .pill { font-size:11px; padding:2px 9px; border-radius:999px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.05em; }
+  .pill.send { background:rgba(52,211,153,.15); color:var(--send); border:1px solid rgba(52,211,153,.35); }
+  .pill.hold { background:rgba(248,113,113,.13); color:var(--hold); border:1px solid rgba(248,113,113,.35); }
+  .pill.cta { background:var(--panel2); color:var(--muted); border:1px solid var(--line); }
+  .msg { margin:10px 0 0; background:var(--panel2); border:1px dashed var(--line);
+    border-radius:8px; padding:10px 12px; color:#cbd8e6; font-size:13.5px; white-space:pre-wrap; }
+  .actions { margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .ok { color:var(--send); font-size:13px; font-weight:600; }
+  .spacer { flex:1; }
+  .empty { color:var(--muted); text-align:center; padding:40px; }
+  .err { color:var(--hold); }
+  footer { margin-top:26px; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <span class="tag">v0.1 · Trusted Advisor</span>
+    <span class="meta">Rainmaker relationship layer — dark unless ENABLE_RELATIONSHIP_V0=1</span>
+  </div>
+  <h1>Proactive Care</h1>
+  <p class="sub">Warmth says <em>how</em>, exposure says <em>when</em>. Reach people
+     with genuinely useful prep <em>before</em> a forecast hazard — CTA dialed to the relationship.</p>
+
+  <div class="controls">
+    <input id="states" type="text" placeholder="States (comma-sep), e.g. TX, MN — blank = all"/>
+    <button id="scan">Run forecast scan</button>
+    <span class="spacer"></span>
+    <span id="status" class="meta"></span>
+  </div>
+
+  <div id="summary" class="summary" hidden></div>
+  <div id="queue"></div>
+
+  <footer>Every path routes to one outcome: an inspection on the calendar — without burning the relationship.</footer>
+</div>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function jpost(url, body) {
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body||{})});
+  return {ok:r.ok, status:r.status, data: await r.json().catch(()=>({}))};
+}
+
+function badge(tier, score) {
+  return `<span class="badge ${esc(tier)}">${esc(tier)}<span class="score">${Number(score).toFixed(0)}</span></span>`;
+}
+
+function cardHTML(row, i) {
+  const send = row.action && row.action.send;
+  const cta  = row.action ? row.action.cta_strength : 'none';
+  const reason = row.action ? row.action.reason : '';
+  const ev = row.event || {event_type: row.event_type};
+  const head = `<div class="row1">
+      ${badge(row.tier, row.relationship_score)}
+      <span class="name">${esc(row.name || row.contact_id)}</span>
+      <span class="meta">${esc(row.service_type||'')} · ${esc(row.event_type||'')}</span>
+      <span class="spacer"></span>
+      ${send ? `<span class="pill send">Send</span>` : `<span class="pill hold">Hold</span>`}
+      <span class="pill cta">cta: ${esc(cta)}</span>
+    </div>`;
+  if (!send) {
+    return `<div class="card hold">${head}
+      <div class="meta" style="margin-top:8px">Held — <b>${esc(reason||'suppressed')}</b></div></div>`;
+  }
+  return `<div class="card" data-i="${i}">
+      ${head}
+      ${row.message ? `<div class="msg">${esc(row.message)}</div>` : ''}
+      <div class="actions">
+        <button class="queueBtn" data-cid="${esc(row.contact_id)}"
+          data-ev='${esc(JSON.stringify(ev))}'>Queue care tip</button>
+        <span class="result meta"></span>
+      </div>
+    </div>`;
+}
+
+async function runScan() {
+  const raw = $('#states').value.trim();
+  const states = raw ? raw.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean) : null;
+  $('#status').textContent = 'Scanning forecast products…';
+  $('#queue').innerHTML = '';
+  const {ok, data} = await jpost('/care/forecast-scan', {states, trigger:'forecast'});
+  if (!ok) { $('#status').innerHTML = `<span class="err">${esc(data.error||'scan failed')}</span>`; return; }
+  $('#status').textContent = '';
+  const q = data.queue || [];
+  const sm = $('#summary'); sm.hidden = false;
+  sm.innerHTML = `Proactive Care queue — <b>${data.to_send||0}</b> to send, <b>${(data.count||0)-(data.to_send||0)}</b> held`;
+  $('#queue').innerHTML = q.length ? q.map(cardHTML).join('') :
+    `<div class="empty">No proactive matches right now. On a calm forecast day that's expected, not a bug.</div>`;
+  bindQueueButtons();
+}
+
+function bindQueueButtons() {
+  document.querySelectorAll('.queueBtn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const cid = btn.getAttribute('data-cid');
+      const ev  = JSON.parse(btn.getAttribute('data-ev'));
+      const res = btn.parentElement.querySelector('.result');
+      btn.disabled = true; res.textContent = 'Queuing…';
+      const {ok, data} = await jpost('/care/queue', {contact_id:cid, event:ev, trigger:'forecast'});
+      if (!ok || data.queued === false) {
+        res.innerHTML = `<span class="err">held: ${esc((data&&data.reason)||'error')}</span>`;
+        btn.disabled = false; return;
+      }
+      res.innerHTML = `<span class="ok">queued #${esc(data.care_send_id)}</span>`;
+      const approve = document.createElement('button');
+      approve.className = 'ghost'; approve.textContent = 'Approve & send';
+      approve.onclick = async () => {
+        approve.disabled = true; approve.textContent = 'Sending…';
+        const r = await jpost('/care/approve-send', {care_send_id: data.care_send_id});
+        approve.textContent = r.ok ? '✓ Sent' : 'Failed';
+      };
+      btn.parentElement.appendChild(approve);
+    });
+  });
+}
+
+$('#scan').addEventListener('click', runScan);
+$('#states').addEventListener('keydown', e => { if (e.key==='Enter') runScan(); });
+</script>
+</body>
+</html>
