@@ -32,7 +32,7 @@ for _p in (_ROOT, _os.path.join(_ROOT, "db"), _os.path.join(_ROOT, "pipeline")):
     if _p not in _sys.path:
         _sys.path.insert(0, _p)
 
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
     BooleanType, DoubleType, StringType, StructField, StructType,
@@ -55,15 +55,17 @@ DELTA_TABLE = "workspace.default.rainmaker_opportunities"
 # Load: Lakebase -> pandas -> Spark
 # ---------------------------------------------------------------------
 def _read_sql(query: str):
+    """
+    pandas warns that psycopg2 is not a SQLAlchemy connectable. It works fine
+    for reads and pulling in SQLAlchemy just to silence a warning is not worth
+    the dependency, so the warning is suppressed at the call site rather than
+    left to clutter every pipeline run.
+    """
     import warnings
 
     import pandas as pd
 
     with _db().connect() as conn:
-        # pandas warns that a raw psycopg2 connection isn't a SQLAlchemy
-        # connectable. It reads fine anyway -- pulling in SQLAlchemy purely to
-        # silence a warning isn't worth the extra dependency. Suppress just this
-        # one message so real warnings still surface.
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*SQLAlchemy connectable.*")
             return pd.read_sql(query, conn)
@@ -85,6 +87,7 @@ CUSTOMER_SCHEMA = StructType([
     StructField("est_job_value", DoubleType()),
     StructField("tier", StringType()),
     StructField("assigned_rep", StringType()),
+    StructField("state", StringType()),
 ])
 
 EVENT_SCHEMA = StructType([
@@ -110,7 +113,7 @@ def load_frames(spark: SparkSession):
     runnable on Free Edition serverless."""
     customers = _read_sql("""
         SELECT customer_id, tenant, service_type, lat, lon,
-               est_job_value, tier, assigned_rep
+               est_job_value, tier, assigned_rep, state
         FROM customers
         WHERE status IN ('active', 'lead')
     """)
@@ -169,21 +172,42 @@ def _proximity_expr(distance, radius):
     overshoot = distance - radius
     decay = F.lit(float(scoring.OUTSIDE_RADIUS_DECAY_KM))
     return (
-        F.when(distance.isNull() | radius.isNull() | (radius <= 0), F.lit(0.5))
+        # Null distance means a zone-based alert with no polygon. The join
+        # above already gated those to the customer's own state, so this branch
+        # is always the same-state case -- hence the same constant the pure
+        # Python path uses for same_state=True.
+        #
+        # This was hardcoded 0.5 while scoring.py had moved to 0.60, and the
+        # parity test missed it because neither fixture event had null
+        # geometry. Two implementations of one rule must read one constant.
+        F.when(
+            distance.isNull() | radius.isNull() | (radius <= 0),
+            F.lit(float(scoring.SAME_STATE_PROXIMITY)),
+        )
         .when(distance <= radius, F.lit(1.0) - F.lit(0.5) * (distance / radius))
         .when(overshoot >= decay, F.lit(0.0))
         .otherwise(F.lit(0.5) * (F.lit(1.0) - overshoot / decay))
     )
 
 
-def _value_expr(job_value, tier):
-    pairs = []
+def _value_expr(job_value, tier, service):
+    """Normalised against THIS TRADE's ceiling. A single roofing-scale ceiling
+    capped the best possible HVAC customer at 0.43 and kept every non-roofing
+    opportunity out of the queue."""
+    tier_pairs = []
     for label, bonus in scoring.TIER_BONUS.items():
-        pairs += [F.lit(label), F.lit(float(bonus))]
-    bonus = F.coalesce(F.element_at(F.create_map(*pairs), tier), F.lit(0.0))
-    base = F.least(
-        F.coalesce(job_value, F.lit(0.0)) / F.lit(float(scoring.VALUE_CEILING)), F.lit(1.0)
+        tier_pairs += [F.lit(label), F.lit(float(bonus))]
+    bonus = F.coalesce(F.element_at(F.create_map(*tier_pairs), tier), F.lit(0.0))
+
+    ceiling_pairs = []
+    for label, ceiling in scoring.VALUE_CEILING_BY_SERVICE.items():
+        ceiling_pairs += [F.lit(label), F.lit(float(ceiling))]
+    ceiling = F.coalesce(
+        F.element_at(F.create_map(*ceiling_pairs), service),
+        F.lit(float(scoring.VALUE_CEILING)),
     )
+
+    base = F.least(F.coalesce(job_value, F.lit(0.0)) / ceiling, F.lit(1.0))
     return F.least(base + bonus, F.lit(1.0))
 
 
@@ -230,10 +254,23 @@ def score(customers_df, events_df, mapping_df):
         .withColumnRenamed("service_type", "cust_service")
     )
 
+    events_mapped = events_mapped.withColumnRenamed("state", "event_state")
+    customers = customers.withColumnRenamed("state", "cust_state")
+
+    # Service line must match. On top of that, an alert with NO POLYGON is
+    # gated to its own state.
+    #
+    # Without this, a zone-based Extreme Heat Warning has no coordinates, so
+    # distance is null, so nothing constrains it spatially -- and a Tucson
+    # customer matched all seven heat warnings in the country including
+    # Florida's. Alerts WITH a polygon need no gate; distance already handles
+    # them, and storms cross state lines.
+    same_service = events_mapped["service_needed"] == customers["cust_service"]
+    has_geometry = events_mapped["event_lat"].isNotNull()
+    same_state = events_mapped["event_state"] == customers["cust_state"]
+
     pairs = events_mapped.join(
-        customers,
-        events_mapped["service_needed"] == customers["cust_service"],
-        how="inner",
+        customers, same_service & (has_geometry | same_state), how="inner"
     )
 
     distance = F.when(
@@ -249,7 +286,9 @@ def score(customers_df, events_df, mapping_df):
         _severity_expr(F.col("severity"))
         * _proximity_expr(F.col("distance_km"), F.col("radius_km").cast(DoubleType()))
         * F.col("urgency_weight").cast(DoubleType())
-        * _value_expr(F.col("est_job_value").cast(DoubleType()), F.col("tier"))
+        * _value_expr(
+            F.col("est_job_value").cast(DoubleType()), F.col("tier"), F.col("service_needed")
+        )
     )
 
     scored = (
@@ -260,6 +299,21 @@ def score(customers_df, events_df, mapping_df):
         .withColumn("priority", _priority_expr(F.col("exposure_score")))
         .withColumn("opportunity_id", _opportunity_id_expr(F.col("event_id"), F.col("customer_id")))
         .withColumn("est_value", F.col("est_job_value").cast(DoubleType()))
+    )
+
+    # One opportunity per customer per hazard type.
+    #
+    # Seven concurrent Extreme Heat Warnings over Arizona are one heat event as
+    # far as a homeowner is concerned. Without this the analyst sees the same
+    # name seven times with identical scores, which reads as broken software
+    # even though every row is technically correct.
+    best_per_hazard = Window.partitionBy("customer_id", "event_type").orderBy(
+        F.col("exposure_score").desc(), F.col("event_id")
+    )
+    scored = (
+        scored.withColumn("_rank", F.row_number().over(best_per_hazard))
+        .filter(F.col("_rank") == 1)
+        .drop("_rank")
     )
 
     # Cutoff: everything below the floor is noise, and a queue full of noise is
@@ -331,11 +385,13 @@ def run() -> int:
     spark = SparkSession.builder.getOrCreate()
 
     customers_df, events_df, mapping_df = load_frames(spark)
-    # No .cache(): serverless rejects PERSIST with [NOT_SUPPORTED_WITH_SERVERLESS].
-    # Each action below re-evaluates the plan, which at this data volume (a few
-    # hundred rows) costs milliseconds -- not worth persisting even if we could.
     opportunities = score(customers_df, events_df, mapping_df)
 
+    # No .cache() here. Serverless compute rejects it:
+    #   [NOT_SUPPORTED_WITH_SERVERLESS] PERSIST TABLE is not supported
+    # The plan is re-evaluated for each action below, which at tens of
+    # thousands of pairs costs milliseconds. Caching would be worth arguing
+    # about at a hundred times this volume; here it buys nothing.
     n = opportunities.count()
     print(f"Scored {n} opportunities above the {scoring.QUEUE_CUTOFF} cutoff.")
 

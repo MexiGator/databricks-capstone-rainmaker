@@ -69,9 +69,25 @@ def test_proximity_decreases_monotonically_with_distance():
     assert all(a >= b for a, b in zip(values, values[1:]))
 
 
-def test_missing_geometry_is_neutral_not_dropped():
-    # Zone-only alerts have no polygon. They must not silently score zero.
-    assert scoring.proximity_factor(None, None) == 0.5
+def test_zone_alert_in_the_same_state_scores_well():
+    """No polygon, but the customer is confirmed inside the alert's state --
+    an Extreme Heat Warning over Arizona means every AC in Tucson is under
+    strain, not that we are 50% unsure."""
+    assert scoring.proximity_factor(None, None, same_state=True) == scoring.SAME_STATE_PROXIMITY
+
+
+def test_zone_alert_in_a_different_state_scores_zero():
+    """The bug this fixes: with no polygon nothing constrained the match
+    spatially, so a Tucson customer matched Florida's heat warning."""
+    assert scoring.proximity_factor(None, None, same_state=False) == 0.0
+
+
+def test_unknown_state_is_penalised_but_not_dropped():
+    """Neither confirmed nor excluded. Lower than a state match, above zero --
+    a parsing failure should not silently delete an opportunity."""
+    p = scoring.proximity_factor(None, None)
+    assert 0 < p < scoring.SAME_STATE_PROXIMITY
+    assert p == scoring.UNKNOWN_STATE_PROXIMITY
 
 
 # ---------------------------------------------------------------------

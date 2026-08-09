@@ -39,15 +39,16 @@ def spark():
 
 # Fort Worth, and a customer 400 km away who must not survive scoring.
 CUSTOMERS = [
-    # customer_id, tenant, service_type, lat, lon, est_job_value, tier, assigned_rep
-    ("cust_0001", "summit-exteriors", "roofing", 32.78, -96.80, 28000.0, "platinum", "Dana Ramirez"),
-    ("cust_0002", "summit-exteriors", "roofing", 32.80, -96.85, 12000.0, "standard", "Kyle Whitfield"),
-    ("cust_0003", "northline-plumbing", "plumbing", 44.98, -93.27, 3000.0, "gold", "Aoife Brennan"),
-    ("cust_0004", "summit-exteriors", "roofing", 35.47, -97.52, 30000.0, "platinum", "Dana Ramirez"),
+    # customer_id, tenant, service_type, lat, lon, est_job_value, tier, rep, state
+    ("cust_0001", "summit-exteriors", "roofing", 32.78, -96.80, 28000.0, "platinum", "Dana Ramirez", "TX"),
+    ("cust_0002", "summit-exteriors", "roofing", 32.80, -96.85, 12000.0, "standard", "Kyle Whitfield", "TX"),
+    ("cust_0003", "northline-plumbing", "plumbing", 44.98, -93.27, 3000.0, "gold", "Aoife Brennan", "MN"),
+    ("cust_0004", "summit-exteriors", "roofing", 35.47, -97.52, 30000.0, "platinum", "Dana Ramirez", "OK"),
+    ("cust_0005", "desert-air-hvac", "hvac", 32.22, -110.97, 11000.0, "gold", "Pilar Salazar", "AZ"),
 ]
 CUSTOMER_COLS = [
     "customer_id", "tenant", "service_type", "lat", "lon",
-    "est_job_value", "tier", "assigned_rep",
+    "est_job_value", "tier", "assigned_rep", "state",
 ]
 
 EVENTS = [
@@ -61,6 +62,7 @@ MAPPING = [
     ("Severe Thunderstorm Warning", "roofing", 0.85),
     ("Hard Freeze Warning", "plumbing", 0.95),
     ("Hard Freeze Warning", "roofing", 0.55),
+    ("Extreme Heat Warning", "hvac", 0.90),
 ]
 MAPPING_COLS = ["event_type", "service_type", "urgency_weight"]
 
@@ -130,7 +132,7 @@ def test_platinum_outranks_standard_at_the_same_storm(scored):
 
 
 def test_spark_scores_match_the_pure_python_oracle(scored):
-    """Parity check. The pure functions are what 20 unit tests cover; this
+    """Parity check. The pure functions are what the unit tests cover; this
     asserts the distributed path produces identical numbers."""
     events = {e[0]: e for e in EVENTS}
     customers = {c[0]: c for c in CUSTOMERS}
@@ -139,9 +141,13 @@ def test_spark_scores_match_the_pure_python_oracle(scored):
     for r in scored.collect():
         e = events[r["weather_event_id"]]
         c = customers[r["customer_id"]]
-        expected_distance = scoring.haversine_km(e[3], e[4], c[3], c[4])
+        has_geom = e[3] is not None
+        distance = scoring.haversine_km(e[3], e[4], c[3], c[4]) if has_geom else None
+        # Spark's join gates null-geometry alerts to the same state, so any
+        # such row that survives is by definition a same-state match.
         expected = scoring.exposure_score(
-            e[2], expected_distance, e[5], urgency[(e[1], c[2])], c[5], c[6]
+            e[2], distance, e[5], urgency[(e[1], c[2])], c[5], c[6], c[2],
+            same_state=None if has_geom else True,
         )
         assert abs(float(r["exposure_score"]) - expected) < 1e-6, r["customer_id"]
 
@@ -187,6 +193,98 @@ def test_all_null_geometry_column_does_not_break_dataframe_creation(spark):
     assert out.count() > 0
     for r in out.collect():
         assert r["distance_km"] is None
+
+
+# ---------------------------------------------------------------------
+# State gating for zone-based alerts
+# ---------------------------------------------------------------------
+def _run(spark, events):
+    return match_and_score.score(
+        spark.createDataFrame(CUSTOMERS, CUSTOMER_SCHEMA),
+        spark.createDataFrame(events, EVENT_SCHEMA),
+        spark.createDataFrame(MAPPING, MAPPING_SCHEMA),
+    )
+
+
+def test_zone_alert_does_not_match_customers_in_other_states(spark):
+    """The bug this fixes: a heat warning in Florida has no polygon, so nothing
+    constrained it spatially and a Tucson customer matched it."""
+    florida_heat = [("nws-fl", "Extreme Heat Warning", "Severe", None, None, 60.0, "FL")]
+    out = _run(spark, florida_heat)
+    assert out.count() == 0
+
+
+def test_zone_alert_matches_customers_in_its_own_state(spark):
+    arizona_heat = [("nws-az", "Extreme Heat Warning", "Severe", None, None, 60.0, "AZ")]
+    ids = {r["customer_id"] for r in _run(spark, arizona_heat).collect()}
+    assert "cust_0005" in ids
+
+
+def test_polygon_alerts_are_not_state_gated(spark):
+    """Storms cross state lines. An alert WITH geometry is constrained by
+    distance, so gating it by state would drop real opportunities."""
+    near_border = [("nws-x", "Severe Thunderstorm Warning", "Severe", 32.79, -96.82, 60.0, "OK")]
+    ids = {r["customer_id"] for r in _run(spark, near_border).collect()}
+    assert "cust_0001" in ids  # a TX customer, matched via a polygon tagged OK
+
+
+# ---------------------------------------------------------------------
+# Dedup: one opportunity per customer per hazard type
+# ---------------------------------------------------------------------
+def test_concurrent_alerts_of_one_type_yield_one_opportunity(spark):
+    """Seven concurrent heat warnings over Arizona are one heat event to a
+    homeowner. Seven identical rows read as broken software."""
+    many = [
+        (f"nws-az-{i}", "Extreme Heat Warning", "Severe", None, None, 60.0, "AZ")
+        for i in range(7)
+    ]
+    rows = [r for r in _run(spark, many).collect() if r["customer_id"] == "cust_0005"]
+    assert len(rows) == 1
+
+
+def test_different_hazard_types_still_produce_separate_opportunities(spark):
+    """Dedup is per hazard type, not per customer -- hail and a freeze are two
+    genuinely different jobs."""
+    events = [
+        ("nws-a", "Severe Thunderstorm Warning", "Severe", 32.79, -96.82, 60.0, "TX"),
+        ("nws-b", "Hard Freeze Warning", "Severe", 32.79, -96.82, 60.0, "TX"),
+    ]
+    rows = [r for r in _run(spark, events).collect() if r["customer_id"] == "cust_0001"]
+    assert len(rows) == 2
+
+
+def test_dedup_keeps_the_highest_scoring_row(spark):
+    events = [
+        ("nws-far", "Severe Thunderstorm Warning", "Severe", 33.60, -96.82, 60.0, "TX"),
+        ("nws-near", "Severe Thunderstorm Warning", "Severe", 32.78, -96.80, 60.0, "TX"),
+    ]
+    rows = [r for r in _run(spark, events).collect() if r["customer_id"] == "cust_0001"]
+    assert len(rows) == 1
+    assert rows[0]["weather_event_id"] == "nws-near"
+
+
+# ---------------------------------------------------------------------
+# Per-service value ceiling
+# ---------------------------------------------------------------------
+def test_parity_holds_on_the_null_geometry_path(spark):
+    """The original parity test only used events WITH polygons, so the two
+    implementations drifted on the zone-alert branch and nothing caught it."""
+    arizona_heat = [("nws-az", "Extreme Heat Warning", "Severe", None, None, 60.0, "AZ")]
+    for r in _run(spark, arizona_heat).collect():
+        c = {x[0]: x for x in CUSTOMERS}[r["customer_id"]]
+        expected = scoring.exposure_score(
+            "Severe", None, 60.0, 0.90, c[5], c[6], c[2], same_state=True
+        )
+        assert abs(float(r["exposure_score"]) - expected) < 1e-6
+
+
+def test_hvac_customer_can_reach_the_queue(spark):
+    """With a single $30k roofing-scale ceiling, the best possible HVAC
+    customer scored 0.43 on value and never cleared the cutoff."""
+    arizona_heat = [("nws-az", "Extreme Heat Warning", "Severe", None, None, 60.0, "AZ")]
+    rows = [r for r in _run(spark, arizona_heat).collect() if r["customer_id"] == "cust_0005"]
+    assert rows, "an $11k HVAC job in an active heat warning must reach the queue"
+    assert float(rows[0]["exposure_score"]) >= scoring.QUEUE_CUTOFF
 
 
 def test_no_matching_service_yields_empty_not_error(spark):
