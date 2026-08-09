@@ -28,6 +28,7 @@ class Trigger(str, Enum):
     ACTIVE_STORM = "active_storm"   # a hazard is hitting now -> damage likely
     FORECAST = "forecast"           # a hazard is forecast (lead time) -> prep/care
     DORMANT = "dormant"             # no weather; a valuable contact has gone quiet
+    CADENCE = "cadence"             # v0.2: time-since-service says "you're due" (no weather)
 
 
 class TemplateKind(str, Enum):
@@ -35,6 +36,7 @@ class TemplateKind(str, Enum):
     DAMAGE_CHECK = "damage_check"            # value-first "here's what to check" + ask
     CARE_TIP = "care_tip"                    # pure prep guidance + soft ask (proactive care)
     REENGAGE = "reengage"                    # seasonal/maintenance re-warm for dormant value
+    CADENCE_DUE = "cadence_due"              # v0.2: recurring service is due (a plain reminder)
     SUPPRESS = "suppress"                    # do not send (with a reason)
 
 
@@ -143,6 +145,18 @@ def select_next_action(tier: str, trigger: Trigger, flags: ContactFlags,
         return Action(False, TemplateKind.SUPPRESS, CtaStrength.NONE,
                       tone="none",
                       reason="dormant+low-value-or-cold: no weather reason to reach out",
+                      trigger=trigger, tier=tier)
+
+    if trigger == Trigger.CADENCE:
+        # v0.2 (additive): a "you're due" reminder. Due is due — reach every
+        # eligible contact (the gate above already enforced consent / frequency /
+        # opt-out); warmth only sets the tone and how hard we ask. This is the
+        # cheapest possible new trigger type: it proves a NON-weather signal flows
+        # through the same shared policy + guardrails untouched.
+        cta = CtaStrength.MEDIUM if hot_or_warm else CtaStrength.SOFT
+        return Action(True, TemplateKind.CADENCE_DUE, cta,
+                      tone="friendly_reminder",
+                      reason=f"cadence+{tier}: service-due reminder",
                       trigger=trigger, tier=tier)
 
     # Unknown trigger -> safe default: do nothing.
