@@ -111,6 +111,41 @@ def recompute_route():
     return jsonify({"updated": updated})
 
 
+@bp.post("/vertical/run")
+def vertical_run_route():
+    """v0.2: run a whole VERTICAL (every active trigger provider in a pack) through
+    the one shared engine. Body: {"states": ["TX"], "pack": "roofing"}.
+
+    Additive + flag-gated (this whole blueprint is dark unless ENABLE_RELATIONSHIP_V0=1),
+    so it changes nothing for the graded app. `event` opportunities use live forecast
+    events; `cadence` uses each contact's days_since_service (from _load_contacts).
+    Contacts without service history are simply skipped by the cadence provider."""
+    from relationship_v0.triggers.engine import run_vertical
+    from relationship_v0.packs.roofing import ROOFING_PACK
+
+    # Only roofing exists today; the next pack lands from the Project Clearview
+    # dossier via packs/_template.py. Unknown pack -> 400 (no silent fallback).
+    packs = {"roofing": ROOFING_PACK}
+    body = request.get_json(silent=True) or {}
+    pack = packs.get(body.get("pack", "roofing"))
+    if pack is None:
+        return jsonify({"error": "unknown_pack",
+                        "available": sorted(packs)}), 400
+
+    states = body.get("states")
+    contacts = _load_contacts(states)
+    provider_contexts = {}
+    if "event" in pack.active_providers:
+        provider_contexts["event"] = {"events": _load_forecast_events(states)}
+
+    queue = run_vertical(pack, contacts, provider_contexts)
+    return jsonify({"pack": pack.key,
+                    "providers": pack.active_providers,
+                    "count": len(queue),
+                    "to_send": sum(1 for r in queue if r["action"]["send"]),
+                    "queue": queue})
+
+
 @bp.post("/care/approve-send")
 def approve_send_route():
     """Body: {"care_send_id": 123}. Flips queued -> sent (+ optional Twilio)."""
@@ -184,6 +219,25 @@ def _load_contacts(states):
     except Exception:
         overlay = {}  # table not created yet -> safe defaults below
 
+    # Best-effort last-service overlay for the v0.2 CadenceProvider ("you're due").
+    # The repo has no dedicated service-history table; a customer's last service is
+    # their most recent COMPLETED/WON booking (an inspection/job that actually
+    # happened). We take max(proposed_slot) per customer -> days_since_service.
+    # Best-effort: with no such bookings (the seeded default), the map is empty,
+    # days_since_service stays None, and cadence is simply inert for that contact.
+    last_service: dict = {}
+    try:
+        with lakebase.cursor(dict_rows=True) as cur:
+            cur.execute(
+                "SELECT customer_id, MAX(proposed_slot) AS last_service_at "
+                "FROM bookings WHERE status IN ('completed', 'won') "
+                "GROUP BY customer_id"
+            )
+            last_service = {r["customer_id"]: r["last_service_at"]
+                            for r in cur.fetchall()}
+    except Exception:
+        last_service = {}  # bookings absent/empty -> cadence inert (safe)
+
     contacts = []
     for r in rows:
         rel = overlay.get(r["customer_id"], {})
@@ -200,6 +254,9 @@ def _load_contacts(states):
             "is_prospect": bool(r["is_prospect"]),
             "tenure_years": _tenure_years(r["tenure_start"]),
             "days_since_last_touch": _days_since(rel.get("last_touch_at")),
+            # v0.2 cadence signal: days since the last completed/won service.
+            # None when there's no service history -> CadenceProvider skips it.
+            "days_since_service": _days_since(last_service.get(r["customer_id"])),
             "consent_ok": rel.get("consent_ok", True),
             "opted_out": rel.get("opted_out", False),
             "recent_care_touches": rel.get("recent_care_touches", 0) or 0,
