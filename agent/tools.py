@@ -76,6 +76,25 @@ def _first_name(full_name: str) -> str:
     return (full_name or "there").split()[0]
 
 
+def _templated_draft(opp: dict, channel: str) -> str:
+    """Deterministic, safety-compliant outreach used ONLY when the model/SDK call
+    fails mid-demo. Same discipline as the prompt's RULES: names the person, city
+    and event, makes ONE ask, and never claims damage has occurred or invents a
+    price or date. This degrades the draft path to a plain mail-merge instead of
+    hard-failing the tool -- a model hiccup shouldn't be able to break draft->send->book."""
+    first = _first_name(opp.get("name"))
+    city = opp.get("city") or "your area"
+    event = opp.get("event_type") or "recent severe weather"
+    service = opp.get("service_needed") or "property"
+    msg = (
+        f"{first}, this is a note from your {service} team. With {event} moving "
+        f"through {city}, it's worth having your {service} checked for "
+        f"weather-related wear before any problem grows. Reply YES and we'll "
+        f"schedule a quick inspection at no obligation."
+    )
+    return msg[:480]
+
+
 # =====================================================================
 # TOOL 0 -- the storm safety notice (always first, never generated)
 # =====================================================================
@@ -226,7 +245,17 @@ RULES:
 
 Write only the message body."""
 
-    message = llm.complete(prompt, max_tokens=300).strip()
+    # A model or SDK hiccup during the live demo must degrade to a templated
+    # draft, not hard-fail the tool. The retrieval/grounding above already
+    # happened, so the row still records what it was grounded on.
+    try:
+        message = llm.complete(prompt, max_tokens=300).strip()
+        if not message:
+            raise ValueError("empty completion")
+        degraded = False
+    except Exception as exc:  # noqa: BLE001 - deliberate: keep draft->send->book alive
+        message = _templated_draft(opp, channel)
+        degraded = True
 
     with lakebase.cursor() as cur:
         cur.execute(
@@ -249,6 +278,8 @@ Write only the message body."""
         "customer": opp["name"],
         "message_text": message,
         "channel": channel,
+        # True when the model/SDK call failed and we served the templated draft.
+        "degraded": degraded,
         # The grounding panel renders these -- this is the visible proof of RAG.
         "grounded_on": template.title if template else None,
         "template_id": template_id,
