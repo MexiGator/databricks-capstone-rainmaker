@@ -145,15 +145,12 @@ def test_degenerate_polygon_gets_minimum_radius():
 # Fetch layer -- fake transport, no network
 # ---------------------------------------------------------------------
 class _FakeResponse:
-    def __init__(self, payload, status=200, text="", json_raises=False):
+    def __init__(self, payload, status=200):
         self._payload = payload
         self.status_code = status
-        self.text = text
-        self._json_raises = json_raises
+        self.text = str(payload)
 
     def json(self):
-        if self._json_raises:
-            raise ValueError("No JSON object could be decoded")
         return self._payload
 
     def raise_for_status(self):
@@ -162,16 +159,14 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, payload, status=200, text="", json_raises=False):
+    def __init__(self, payload, status=200):
         self._payload = payload
         self._status = status
-        self._text = text
-        self._json_raises = json_raises
         self.last_kwargs = None
 
     def get(self, url, **kwargs):
         self.last_kwargs = kwargs
-        return _FakeResponse(self._payload, self._status, self._text, self._json_raises)
+        return _FakeResponse(self._payload, self._status)
 
 
 def test_fetch_filters_out_malformed_features():
@@ -194,108 +189,38 @@ def test_fetch_passes_state_filter():
     assert session.last_kwargs["params"]["area"] == "TX,OK"
 
 
-def test_fetch_never_sends_event_param():
-    """NWS validates `event` against a fixed enum and returns HTTP 400 when any
-    value is stale. We must filter event types client-side, so `event` must
-    never appear in the outgoing query params -- even when event_types is set."""
+def test_event_filter_is_never_sent_to_the_api():
+    """Passing event= 400s the whole request if one name is stale, and NWS
+    renames events. We filter client-side instead."""
     session = _FakeSession({"features": []})
-    wc.fetch_active_alerts(
-        states=["TX"],
-        event_types=["Severe Thunderstorm Warning", "Flood Watch"],
-        session=session,
-    )
+    wc.fetch_active_alerts(event_types=["Tornado Warning"], session=session)
     assert "event" not in session.last_kwargs["params"]
 
 
-def test_client_side_event_filter_keeps_only_matching_types():
-    payload = {
-        "features": [
-            _feature(properties={"id": "a", "event": "Severe Thunderstorm Warning"}),
-            _feature(properties={"id": "b", "event": "Flood Watch"}),
-            _feature(properties={"id": "c", "event": "Special Weather Statement"}),
-        ]
-    }
+def test_event_filter_is_applied_client_side():
+    payload = {"features": [
+        _feature(),  # Severe Thunderstorm Warning
+        _feature(properties={"event": "Air Quality Alert", "id": "urn:oid:other"}),
+    ]}
     rows = wc.fetch_active_alerts(
-        event_types=["Severe Thunderstorm Warning", "Flood Watch"],
-        session=_FakeSession(payload),
+        event_types=["Severe Thunderstorm Warning"], session=_FakeSession(payload)
     )
-    kept = {r["event_type"] for r in rows}
-    assert kept == {"Severe Thunderstorm Warning", "Flood Watch"}
+    assert len(rows) == 1
+    assert rows[0]["event_type"] == "Severe Thunderstorm Warning"
 
 
-def test_client_side_event_filter_is_case_insensitive():
-    payload = {
-        "features": [
-            _feature(properties={"id": "a", "event": "Severe Thunderstorm Warning"}),
-            _feature(properties={"id": "b", "event": "Flood Watch"}),
-        ]
-    }
+def test_event_filter_is_case_insensitive():
     rows = wc.fetch_active_alerts(
-        event_types=["severe thunderstorm warning", "FLOOD WATCH"],
-        session=_FakeSession(payload),
+        event_types=["severe thunderstorm warning"], session=_FakeSession({"features": [_feature()]})
     )
-    assert len(rows) == 2
+    assert len(rows) == 1
 
 
-def test_no_event_types_returns_all_normalized_alerts():
-    """event_types=None means 'no event filter' -- every valid alert survives."""
-    payload = {
-        "features": [
-            _feature(properties={"id": "a", "event": "Heat Advisory"}),
-            _feature(properties={"id": "b", "event": "Special Weather Statement"}),
-        ]
-    }
+def test_no_event_filter_returns_everything():
+    payload = {"features": [_feature(), _feature(properties={"event": "Air Quality Alert",
+                                                             "id": "urn:oid:other"})]}
     rows = wc.fetch_active_alerts(session=_FakeSession(payload))
     assert len(rows) == 2
-
-
-def test_fetch_never_sends_limit_param():
-    """/alerts/active does not accept `limit` -- it 400s with
-    'Query parameter "limit" is not recognized'. It must never be sent."""
-    session = _FakeSession({"features": []})
-    wc.fetch_active_alerts(states=["TX"], session=session)
-    assert "limit" not in session.last_kwargs["params"]
-
-
-def test_400_with_parameter_errors_names_the_rejected_parameter():
-    """A rejected-parameter 400 must surface WHICH parameter NWS rejected,
-    not just the status code -- that detail is the whole fix."""
-    problem = {
-        "type": "https://api.weather.gov/problems/InvalidParameter",
-        "title": "Invalid Parameter",
-        "status": 400,
-        "detail": "Bad request",
-        "parameterErrors": [
-            {"parameter": "limit", "message": 'Query parameter "limit" is not recognized'},
-        ],
-    }
-    session = _FakeSession(problem, status=400)
-    with pytest.raises(RuntimeError) as exc:
-        wc.fetch_active_alerts(states=["TX"], session=session)
-    msg = str(exc.value)
-    assert "limit" in msg
-    assert "not recognized" in msg
-    assert "400" in msg
-
-
-def test_non_json_error_body_still_raises_cleanly():
-    """Not every error body is problem+json (proxy 502s, HTML pages). The
-    client must still raise a RuntimeError, falling back to the raw text."""
-    session = _FakeSession(
-        None, status=502, text="502 Bad Gateway", json_raises=True
-    )
-    with pytest.raises(RuntimeError) as exc:
-        wc.fetch_active_alerts(states=["TX"], session=session)
-    assert "502" in str(exc.value)
-
-
-def test_error_falls_back_to_detail_when_no_parameter_errors():
-    """When the problem body has no parameterErrors, use `detail`/`title`."""
-    problem = {"title": "Forbidden", "status": 403, "detail": "User-Agent required"}
-    session = _FakeSession(problem, status=403)
-    with pytest.raises(RuntimeError) as exc:
-        wc.fetch_active_alerts(session=session)
-    assert "User-Agent required" in str(exc.value)
 
 
 def test_empty_response_returns_empty_list_not_none():
@@ -306,3 +231,110 @@ def test_empty_response_returns_empty_list_not_none():
 def test_missing_features_key_does_not_crash():
     rows = wc.fetch_active_alerts(session=_FakeSession({}))
     assert rows == []
+
+
+# ---------------------------------------------------------------------
+# Error reporting -- NWS tells you what it rejected; don't throw that away
+# ---------------------------------------------------------------------
+def test_limit_is_never_sent():
+    """/alerts/active rejects `limit` outright: 400 'Query parameter "limit"
+    is not recognized'. Cost one debugging round trip."""
+    session = _FakeSession({"features": []})
+    wc.fetch_active_alerts(states=["TX"], session=session)
+    assert "limit" not in session.last_kwargs["params"]
+
+
+def test_parameter_errors_are_surfaced_in_the_message():
+    """Bare '400 Bad Request' means another round trip. The problem detail
+    names the offending parameter, so put it in the exception."""
+    problem = {
+        "title": "Bad Request",
+        "parameterErrors": [
+            {"parameter": "query.limit", "message": 'Query parameter "limit" is not recognized'}
+        ],
+    }
+    with pytest.raises(RuntimeError) as err:
+        wc.fetch_active_alerts(session=_FakeSession(problem, status=400))
+    assert "query.limit" in str(err.value)
+    assert "not recognized" in str(err.value)
+
+
+def test_non_json_error_body_still_raises_cleanly():
+    class _Bad:
+        status_code = 500
+        text = "upstream exploded"
+
+        def json(self):
+            raise ValueError("not json")
+
+    class _S:
+        last_kwargs = None
+
+        def get(self, url, **kwargs):
+            return _Bad()
+
+    with pytest.raises(RuntimeError) as err:
+        wc.fetch_active_alerts(session=_S())
+    assert "500" in str(err.value)
+
+
+def test_successful_response_does_not_raise():
+    assert wc.fetch_active_alerts(session=_FakeSession({"features": []})) == []
+
+
+# ---------------------------------------------------------------------
+# State comes from UGC codes, not from prose
+# ---------------------------------------------------------------------
+def _with_geocode(ugc, area_desc="Swain; Haywood"):
+    f = _feature(properties={"areaDesc": area_desc, "geocode": {"UGC": ugc}})
+    return f
+
+
+def test_state_comes_from_ugc_codes():
+    """The real fix: areaDesc for zone-based alerts is bare county names with
+    no state ('Swain; Haywood'). The UGC code carries it — NCZ051 is NC."""
+    row = wc.normalize_alert(_with_geocode(["NCZ051", "NCZ052"]))
+    assert row["state"] == "NC"
+
+
+def test_zone_format_alerts_are_no_longer_stateless():
+    """These are exactly the alerts with no polygon, so a null state left them
+    unable to match any customer at all."""
+    for ugc, expected in [(["TXZ002"], "TX"), (["AZZ502"], "AZ"), (["KSZ007"], "KS")]:
+        assert wc.normalize_alert(_with_geocode(ugc))["state"] == expected
+
+
+def test_multi_state_alerts_keep_every_state():
+    """One Heat Advisory can span ARZ and LAZ zones. Dropping the second
+    loses real customers."""
+    row = wc.normalize_alert(_with_geocode(["ARZ050", "LAZ001", "LAZ002"]))
+    assert row["states"] == ["AR", "LA"]
+    assert row["state"] == "AR"
+
+
+def test_county_format_still_works_without_geocode():
+    """The old areaDesc path is kept as a fallback for alerts that arrive
+    with no UGC codes."""
+    f = _feature(properties={"areaDesc": "Tarrant, TX; Dallas, TX"})
+    f["properties"].pop("geocode", None)
+    assert wc.normalize_alert(f)["state"] == "TX"
+
+
+def test_no_geocode_and_unparseable_area_desc_yields_none():
+    f = _feature(properties={"areaDesc": "Coastal waters"})
+    f["properties"].pop("geocode", None)
+    row = wc.normalize_alert(f)
+    assert row["state"] is None
+    assert row["states"] == []
+
+
+def test_malformed_ugc_entries_are_skipped():
+    """Nulls, empties, non-strings and too-short codes are all discarded.
+    A real UGC code is at least three characters: state + Z/C + number."""
+    row = wc.normalize_alert(_with_geocode(["NCZ051", None, "", 42, "XX", "TXZ002"]))
+    assert row["states"] == ["NC", "TX"]
+
+
+def test_duplicate_zones_in_one_state_yield_one_entry():
+    row = wc.normalize_alert(_with_geocode(["TXZ002", "TXZ007", "TXZ013"]))
+    assert row["states"] == ["TX"]

@@ -115,7 +115,8 @@ def normalize_alert(feature: dict[str, Any]) -> dict[str, Any] | None:
     narrative = "\n\n".join(part for part in (description, instruction) if part)
 
     area_desc = props.get("areaDesc") or ""
-    state = _infer_state(area_desc)
+    states = _states_from_geocode(props)
+    state = states[0] if states else _infer_state(area_desc)
 
     return {
         "event_id": event_id,
@@ -126,6 +127,9 @@ def normalize_alert(feature: dict[str, Any]) -> dict[str, Any] | None:
         "headline": props.get("headline"),
         "area_desc": area_desc,
         "state": state,
+        # Every state the alert touches. `state` is the first for backwards
+        # compatibility; zone gating should use this.
+        "states": states or ([state] if state else []),
         "lat": lat,
         "lon": lon,
         "radius_km": radius,
@@ -136,13 +140,41 @@ def normalize_alert(feature: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _states_from_geocode(props: dict[str, Any]) -> list[str]:
+    """
+    Pull states from the UGC codes, which is where NWS actually puts them.
+
+    A UGC code is STATE + Z/C + zone number: NCZ051 is North Carolina zone 51,
+    TXZ002 is Texas zone 2. Every alert carries them.
+
+    This replaced parsing `areaDesc`, which works for county-format alerts
+    ("Tarrant, TX") and fails silently for the zone-format ones that heat and
+    Special Weather Statement alerts use ("Swain; Haywood", "Jewell"). Those
+    are exactly the alerts with no polygon, so a null state left them unable
+    to match any customer at all.
+
+    Returns every state the alert touches. One Heat Advisory can span ARZ and
+    LAZ zones, and dropping the second one loses real customers.
+    """
+    geocode = (props.get("geocode") or {})
+    ugc = geocode.get("UGC") or []
+    states = []
+    for code in ugc:
+        if isinstance(code, str) and len(code) >= 3 and code[:2].isalpha():
+            st = code[:2].upper()
+            if st not in states:
+                states.append(st)
+    return states
+
+
 def _infer_state(area_desc: str) -> str | None:
     """
-    NWS areaDesc looks like 'Tarrant, TX; Dallas, TX'. Take the first
-    2-letter token after a comma. Cheap, and only used as a coarse fallback
-    when an alert has no polygon.
+    Fallback for the county format, 'Tarrant, TX; Dallas, TX'.
+
+    Only used when the geocode block is missing. Kept because it costs
+    nothing and covers alerts that arrive without UGC codes.
     """
-    for chunk in area_desc.split(";"):
+    for chunk in (area_desc or "").split(";"):
         parts = [p.strip() for p in chunk.split(",")]
         if len(parts) >= 2 and len(parts[-1]) == 2 and parts[-1].isalpha():
             return parts[-1].upper()
@@ -152,48 +184,31 @@ def _infer_state(area_desc: str) -> str | None:
 # ---------------------------------------------------------------------
 # Fetch
 # ---------------------------------------------------------------------
-def _raise_for_nws_error(resp: Any) -> None:
+def _raise_with_detail(resp) -> None:
     """
-    On a 4xx/5xx, raise RuntimeError carrying NWS's problem detail.
+    Turn an NWS error into something that names the actual problem.
 
-    NWS answers a bad request with RFC-7807 problem+json whose `parameterErrors`
-    array names exactly which query parameter it rejected and why (e.g.
-    'Query parameter "limit" is not recognized'). requests' raise_for_status()
-    throws that body away and reports only the status code -- turning a one-line
-    fix into an hour of guessing. Parse it out instead.
-
-    Falls back to `detail`, then `title`, then the raw response text when the
-    body is not the expected shape (or is not JSON at all).
+    weather.gov returns RFC-7807 problem details listing exactly which query
+    parameter it rejected. resp.raise_for_status() throws that away and leaves
+    you with "400 Bad Request" and a URL to squint at -- which cost a full
+    debugging round trip on `limit`. Never again.
     """
-    if resp.status_code < 400:
+    status = getattr(resp, "status_code", 200)
+    if status < 400:
         return
-
-    detail: str | None = None
+    detail = ""
     try:
-        body = resp.json()
-    except Exception:
-        body = None
-
-    if isinstance(body, dict):
-        param_errors = body.get("parameterErrors")
-        if isinstance(param_errors, list) and param_errors:
-            parts = []
-            for pe in param_errors:
-                if not isinstance(pe, dict):
-                    continue
-                param = pe.get("parameter")
-                message = pe.get("message")
-                parts.append(f"{param}: {message}" if param else str(message))
-            detail = "; ".join(p for p in parts if p) or None
-        if not detail:
-            detail = body.get("detail") or body.get("title")
-
-    if not detail:
-        detail = (getattr(resp, "text", "") or "").strip() or None
-
-    raise RuntimeError(
-        f"NWS request failed (HTTP {resp.status_code}): {detail or 'no detail provided'}"
-    )
+        body = resp.json() or {}
+        errors = body.get("parameterErrors") or []
+        if errors:
+            detail = "; ".join(
+                f"{e.get('parameter')}: {e.get('message')}" for e in errors
+            )
+        else:
+            detail = body.get("detail") or body.get("title") or ""
+    except Exception:  # noqa: BLE001 - a non-JSON body is not worth failing over
+        detail = (getattr(resp, "text", "") or "")[:200]
+    raise RuntimeError(f"NWS returned HTTP {status}. {detail}".strip())
 
 
 def fetch_active_alerts(
@@ -202,26 +217,31 @@ def fetch_active_alerts(
     session: requests.Session | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Fetch active alerts, optionally filtered to the states we cover and the
-    event types that actually create service demand.
+    Fetch active alerts for the given states, then filter to the event types
+    that create service demand.
 
-    We filter by state server-side but by event type CLIENT-SIDE. The NWS
-    `event` query param validates against a fixed enum and returns HTTP 400
-    when any value is stale or unrecognised -- one bad name fails the whole
-    poll. Fetching by state and matching event_type in Python is resilient to
-    that: an event name that no longer exists simply matches nothing.
+    The event filter is applied CLIENT-SIDE, deliberately.
 
-    No `limit` param: /alerts/active does not accept one (it 400s with
-    'Query parameter "limit" is not recognized'). Active alerts are naturally
-    bounded -- the whole US is a few hundred at a time.
+    Passing `event=` to the API returns HTTP 400 if any single value is not in
+    the NWS enum, and that enum drifts -- "Extreme Heat Warning" replaced
+    "Excessive Heat Warning" in 2025, and "Extreme Cold Warning" replaced "Wind
+    Chill Warning". One stale name in the list kills the whole request, and the
+    400 says nothing about which name was the problem.
+
+    Filtering here costs a little more data over the wire and cannot break.
+    Same reasoning as best_template using retrieval instead of an equality
+    match: the upstream vocabulary is not ours to control.
     """
+    # NOTE: no `limit` parameter. /alerts/active does not accept one and
+    # returns 400 "Query parameter \"limit\" is not recognized" if you send it.
+    # Active alerts are naturally bounded -- the whole US runs to a few hundred.
     params: dict[str, Any] = {"status": "actual", "message_type": "alert"}
     if states:
         params["area"] = ",".join(states)
 
     http = session or requests
     resp = http.get(NWS_ALERTS_URL, params=params, headers=_headers(), timeout=TIMEOUT)
-    _raise_for_nws_error(resp)
+    _raise_with_detail(resp)
 
     features = (resp.json() or {}).get("features") or []
     rows = [normalize_alert(f) for f in features]

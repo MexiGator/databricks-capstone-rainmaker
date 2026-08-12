@@ -55,6 +55,30 @@ EVENT_SERVICE_MAP: list[tuple[str, str, float, str]] = [
     ("Hurricane Warning",           "restoration",  0.95, "water intrusion"),
     ("Tropical Storm Warning",      "restoration",  0.80, "water intrusion"),
     ("Tropical Storm Warning",      "roofing",      0.70, "wind uplift"),
+
+    # WATCHES. A watch means conditions are favourable but the event has not
+    # happened yet. Lower urgency than the matching warning, but they are
+    # issued hours ahead and are far more common, so leaving them unmapped
+    # meant the pipeline ignored most of what NWS actually publishes.
+    ("Flood Watch",                 "restoration",  0.55, "possible water intrusion"),
+    ("Flash Flood Watch",           "restoration",  0.65, "possible rapid intrusion"),
+    ("Severe Thunderstorm Watch",   "roofing",      0.50, "possible hail / wind"),
+    ("Tornado Watch",               "roofing",      0.60, "possible structural wind damage"),
+    ("Winter Storm Watch",          "plumbing",     0.55, "possible frozen lines"),
+    ("Hurricane Watch",             "roofing",      0.70, "possible wind uplift"),
+
+    # SPECIAL WEATHER STATEMENT is a catch-all NWS uses for sub-warning
+    # hazards -- gusty winds, small hail, brief downpours. Low urgency by
+    # design, but it is the single most common product they publish and
+    # ignoring it discarded a third of every poll.
+    ("Special Weather Statement",   "roofing",      0.35, "sub-warning wind or hail"),
+    ("Special Weather Statement",   "restoration",  0.30, "brief heavy rain"),
+
+    # Heat products drive HVAC. Excessive Heat Warning was the pre-2025 name
+    # and still appears from some offices, so both are mapped.
+    ("Excessive Heat Warning",      "hvac",         0.90, "compressor failure under load"),
+    ("Excessive Heat Watch",        "hvac",         0.60, "possible capacity strain"),
+    ("Extreme Heat Watch",          "hvac",         0.60, "possible capacity strain"),
 ]
 
 # =====================================================================
