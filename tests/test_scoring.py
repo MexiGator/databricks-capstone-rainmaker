@@ -186,3 +186,66 @@ def test_opportunity_id_differs_per_event():
 def test_opportunity_id_is_not_order_confusable():
     """id(A,B) must not collide with id(B,A) -- the delimiter earns its keep."""
     assert scoring.opportunity_id("x", "y") != scoring.opportunity_id("y", "x")
+
+
+# ---------------------------------------------------------------------
+# Seed integrity
+#
+# These guard the DATA, not the logic. A duplicate key here does not fail
+# at import or in any scoring test -- it fails at INSERT time, inside
+# Postgres, with "ON CONFLICT DO UPDATE command cannot affect row a second
+# time". That is a long way from the line that caused it.
+# ---------------------------------------------------------------------
+def test_event_service_map_has_no_duplicate_keys():
+    """(event_type, service_type) is the primary key. Two rows sharing one
+    makes the whole ON CONFLICT batch fail, not just that row."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "db"))
+    import seed
+
+    from collections import Counter
+    keys = [(m[0], m[1]) for m in seed.EVENT_SERVICE_MAP]
+    dupes = [k for k, n in Counter(keys).items() if n > 1]
+    assert not dupes, f"duplicate (event_type, service_type): {dupes}"
+
+
+def test_event_service_map_urgency_weights_are_in_range():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "db"))
+    import seed
+
+    for event, service, weight, _ in seed.EVENT_SERVICE_MAP:
+        assert 0 <= weight <= 1, f"{event}/{service} has weight {weight}"
+
+
+def test_event_service_map_service_types_are_known():
+    """A typo'd service line silently maps a hazard to nobody."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "db"))
+    import seed
+
+    known = {"roofing", "plumbing", "hvac", "restoration"}
+    for event, service, _, _ in seed.EVENT_SERVICE_MAP:
+        assert service in known, f"{event} maps to unknown service {service!r}"
+
+
+def test_watches_rank_below_their_matching_warnings():
+    """A watch means conditions are favourable; a warning means it is
+    happening. The watch must not score higher."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "db"))
+    import seed
+
+    weights = {(m[0], m[1]): m[2] for m in seed.EVENT_SERVICE_MAP}
+    pairs = [
+        (("Flood Watch", "restoration"), ("Flood Warning", "restoration")),
+        (("Flash Flood Watch", "restoration"), ("Flash Flood Warning", "restoration")),
+        (("Hurricane Watch", "roofing"), ("Hurricane Warning", "roofing")),
+    ]
+    for watch, warning in pairs:
+        if watch in weights and warning in weights:
+            assert weights[watch] < weights[warning], f"{watch} >= {warning}"

@@ -24,9 +24,12 @@ from __future__ import annotations
 import random
 from datetime import date, timedelta
 
-from psycopg2.extras import execute_values
-
-import lakebase
+# psycopg2 and lakebase are imported lazily inside the writer functions.
+# The data below -- EVENT_SERVICE_MAP, the tenants, the templates -- is plain
+# Python, and it should be inspectable by a test without a database driver
+# installed. A duplicate key in that data fails at INSERT time inside
+# Postgres, a long way from the line that caused it, so the tests that catch
+# it need to be able to import this module cheaply.
 
 RANDOM_SEED = 42
 
@@ -74,9 +77,8 @@ EVENT_SERVICE_MAP: list[tuple[str, str, float, str]] = [
     ("Special Weather Statement",   "roofing",      0.35, "sub-warning wind or hail"),
     ("Special Weather Statement",   "restoration",  0.30, "brief heavy rain"),
 
-    # Heat products drive HVAC. Excessive Heat Warning was the pre-2025 name
-    # and still appears from some offices, so both are mapped.
-    ("Excessive Heat Warning",      "hvac",         0.90, "compressor failure under load"),
+    # Heat watches. The warning-level products (Excessive Heat Warning,
+    # Extreme Heat Warning, Heat Advisory) are already mapped above.
     ("Excessive Heat Watch",        "hvac",         0.60, "possible capacity strain"),
     ("Extreme Heat Watch",          "hvac",         0.60, "possible capacity strain"),
 ]
@@ -390,6 +392,8 @@ OUTREACH_TEMPLATES: list[tuple[str, str, str, str, str, float, int]] = [
 # WRITERS -- all UPSERT, so re-running is safe.
 # =====================================================================
 def _seed_event_service_map(cur) -> int:
+    from psycopg2.extras import execute_values
+
     execute_values(
         cur,
         """
@@ -406,6 +410,8 @@ def _seed_event_service_map(cur) -> int:
 
 
 def _seed_customers(cur) -> int:
+    from psycopg2.extras import execute_values
+
     rows = build_customers()
     execute_values(
         cur,
@@ -441,6 +447,8 @@ def _seed_customers(cur) -> int:
 
 
 def _seed_templates(cur) -> int:
+    from psycopg2.extras import execute_values
+
     rows = [
         (t_id, name, event, service, msg, rate, sends)
         for (t_id, name, event, service, msg, rate, sends) in OUTREACH_TEMPLATES
@@ -466,6 +474,8 @@ def _seed_templates(cur) -> int:
 
 
 def run() -> None:
+    import lakebase
+
     with lakebase.cursor() as cur:
         n_map = _seed_event_service_map(cur)
         n_cust = _seed_customers(cur)
@@ -478,5 +488,7 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    import lakebase
+
     lakebase.ensure_schema()
     run()
