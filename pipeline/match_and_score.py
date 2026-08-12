@@ -373,7 +373,18 @@ def sync_to_lakebase(df) -> int:
     """
     from psycopg2.extras import execute_values
 
-    rows = [tuple(r) for r in df.toPandas().itertuples(index=False, name=None)]
+    # toPandas() turns every Spark null in a numeric column into NaN, because
+    # pandas float64 has no separate missing value. psycopg2 then writes that
+    # NaN into Postgres, which accepts it as a legitimate double -- and the
+    # JSON serializer later emits a bare `NaN`, which is not valid JSON and
+    # makes the browser's JSON.parse throw before any render code runs.
+    #
+    # Zone-based NWS alerts carry no polygon, so distance_km is genuinely
+    # null for them. Converting back here keeps the null all the way through.
+    pdf = df.toPandas()
+    pdf = pdf.astype(object).where(pdf.notna(), None)
+
+    rows = [tuple(r) for r in pdf.itertuples(index=False, name=None)]
     if not rows:
         return 0
     with _db().cursor() as cur:

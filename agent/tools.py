@@ -76,6 +76,20 @@ def _first_name(full_name: str) -> str:
     return (full_name or "there").split()[0]
 
 
+def _distance_phrase(distance_km: float | None) -> str:
+    """
+    Describe distance for the draft prompt.
+
+    Zone-based NWS alerts (heat, most Special Weather Statements) carry no
+    polygon, so there is no centre to measure from and distance is genuinely
+    null. A format string assuming a number crashes the draft on exactly
+    those alerts -- which are the ones the state-gating path exists to serve.
+    """
+    if distance_km is None:
+        return "not applicable — this is a zone-wide alert with no storm centre"
+    return f"{distance_km:.0f} km"
+
+
 def _templated_draft(opp: dict, channel: str) -> str:
     """Deterministic, safety-compliant outreach used ONLY when the model/SDK call
     fails mid-demo. Same discipline as the prompt's RULES: names the person, city
@@ -231,7 +245,7 @@ RELATIONSHIP: {relationship}
 SERVICE LINE: {opp['service_needed']}
 LIVE WEATHER EVENT: {opp['event_type']} — {opp['headline']}
 SEVERITY: {opp['severity']}
-DISTANCE FROM STORM CENTRE: {opp['distance_km']:.0f} km
+DISTANCE FROM STORM CENTRE: {_distance_phrase(opp['distance_km'])}
 
 {grounding}
 

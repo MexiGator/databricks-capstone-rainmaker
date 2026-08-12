@@ -30,6 +30,25 @@ from agent import retrieval, simulate, tools
 
 app = Flask(__name__)
 
+# Postgres accepts NaN as a real double, so a null distance that had passed
+# through pandas arrived here as NaN and silently broke the queue (bare NaN is
+# invalid JSON, so the browser's JSON.parse threw). Fixed at the source too, but
+# a serializer that cannot emit invalid JSON is worth having regardless.
+app.json.allow_nan = False
+
+
+def _json_safe(value):
+    """Recursively replace NaN and Infinity with None."""
+    import math
+
+    if isinstance(value, float):
+        return None if (math.isnan(value) or math.isinf(value)) else value
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
 
 def _fail(exc: Exception, code: int = 500):
     """Return the actual error. A console that hides why an action failed is
@@ -140,7 +159,7 @@ def opportunities():
         for row in rows:
             row["draft"] = drafts.get(row["opportunity_id"])
             row["safety"] = notices.get(row["opportunity_id"])
-        return jsonify(rows)
+        return jsonify(_json_safe(rows))
     except Exception as exc:
         return _fail(exc)
 
